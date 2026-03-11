@@ -28,6 +28,38 @@ function readJson(key) {
   }
 }
 
+function parseTallaQtyMap(raw) {
+  const map = new Map();
+  const parts = String(raw || "")
+    .split(/[\n,;]+/g)
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+
+  for (const part of parts) {
+    const match = part.match(/^(.+?)(?:\s*[=:x]\s*)(\d+)$/i);
+    if (!match) continue;
+    const talla = String(match[1] || "").trim();
+    const qty = Number(match[2] || 0);
+    if (!talla) continue;
+    if (!Number.isFinite(qty) || qty < 0) continue;
+    map.set(talla, qty);
+  }
+
+  return map;
+}
+
+function parseBulkQtyConfig(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return { allQty: null, tallaQtyMap: new Map() };
+  if (/^\d+$/.test(trimmed)) {
+    const qty = Number(trimmed);
+    if (!Number.isFinite(qty) || qty < 0)
+      return { allQty: null, tallaQtyMap: new Map() };
+    return { allQty: qty, tallaQtyMap: new Map() };
+  }
+  return { allQty: null, tallaQtyMap: parseTallaQtyMap(trimmed) };
+}
+
 function LabelPreview({ category, product, codeType, codeText }) {
   return (
     <div className="w-full rounded-2xl bg-white p-4 ring-1 ring-slate-200">
@@ -115,6 +147,8 @@ export default function EtiquetasPage() {
   const [codeType, setCodeType] = useState("qr");
   const [sheetCount, setSheetCount] = useState(String(SHEET_PAGE_SIZE));
   const [sheet, setSheet] = useState([]);
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [bulkTallaQtyText, setBulkTallaQtyText] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -165,6 +199,20 @@ export default function EtiquetasPage() {
     [products, effectiveSelectedProductCode],
   );
 
+  const effectiveBulkCategoryId = useMemo(() => {
+    if (!categories.length) return "";
+    if (!bulkCategoryId) return "";
+    return categories.some((c) => c.id === bulkCategoryId)
+      ? bulkCategoryId
+      : "";
+  }, [categories, bulkCategoryId]);
+
+  const productsForBulk = useMemo(() => {
+    return products.filter((p) =>
+      effectiveBulkCategoryId ? p.categoryId === effectiveBulkCategoryId : true,
+    );
+  }, [products, effectiveBulkCategoryId]);
+
   const codeText = useMemo(() => {
     if (!selectedProduct) return "";
     return String(selectedProduct.code || "").trim();
@@ -198,6 +246,85 @@ export default function EtiquetasPage() {
           codeType,
           codeText: ct,
         });
+      }
+      return next;
+    });
+  }
+
+  const bulkTotalPreview = useMemo(() => {
+    const { allQty, tallaQtyMap } = parseBulkQtyConfig(bulkTallaQtyText);
+    if (Number.isFinite(allQty) && allQty > 0) {
+      return productsForBulk.length * allQty;
+    }
+    return productsForBulk.reduce((acc, p) => {
+      const talla = String(p?.talla ?? "").trim();
+      const qty = tallaQtyMap.has(talla)
+        ? Number(tallaQtyMap.get(talla) || 0)
+        : 0;
+      return acc + (Number.isFinite(qty) && qty > 0 ? qty : 0);
+    }, 0);
+  }, [bulkTallaQtyText, productsForBulk]);
+
+  const bulkPagesPreview = useMemo(() => {
+    const total = Number(bulkTotalPreview || 0);
+    if (!Number.isFinite(total) || total <= 0) return 0;
+    return Math.ceil(total / SHEET_PAGE_SIZE);
+  }, [bulkTotalPreview]);
+
+  function addBulkToSheet() {
+    const { allQty, tallaQtyMap } = parseBulkQtyConfig(bulkTallaQtyText);
+
+    const pending = [];
+    let total = 0;
+    for (const p of productsForBulk) {
+      const talla = String(p?.talla ?? "").trim();
+      const qty =
+        Number.isFinite(allQty) && allQty > 0
+          ? allQty
+          : tallaQtyMap.has(talla)
+            ? Number(tallaQtyMap.get(talla) || 0)
+            : 0;
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      pending.push({ product: p, qty });
+      total += qty;
+    }
+
+    if (!pending.length) {
+      window.alert(
+        "No hay etiquetas para agregar. Escribe 30 para todas o usa formato 22=10,24=10.",
+      );
+      return;
+    }
+    if (total > 20000) {
+      window.alert(
+        `Demasiadas etiquetas (${total}). Máximo 20000 por operación.`,
+      );
+      return;
+    }
+    if (total > 5000) {
+      const ok = window.confirm(
+        `Se agregarán ${total} etiquetas a la hoja.\n\n¿Continuar?`,
+      );
+      if (!ok) return;
+    }
+
+    setSheet((prev) => {
+      const next = [...prev];
+      let seq = 0;
+      for (const entry of pending) {
+        const p = entry.product;
+        const ct = String(p?.code || "").trim();
+        if (!ct) continue;
+        for (let i = 0; i < entry.qty; i += 1) {
+          next.push({
+            id: `${Date.now()}-${Math.random()}-${seq}`,
+            categoryId: p.categoryId,
+            productCode: p.code,
+            codeType,
+            codeText: ct,
+          });
+          seq += 1;
+        }
       }
       return next;
     });
@@ -296,6 +423,58 @@ export default function EtiquetasPage() {
                 onClick={printSheet}
               >
                 Imprimir
+              </BigButton>
+            </div>
+
+            <div className="sm:col-span-2 mt-2 border-t border-slate-200 pt-4">
+              <div className="text-lg font-extrabold tracking-tight">
+                Impresión masiva
+              </div>
+              <div className="mt-1 text-sm font-semibold text-slate-600">
+                Escribe 30 para todas o usa formato 22=10,24=10,26=5.
+              </div>
+            </div>
+
+            <SelectField
+              label="Categoría (masivo)"
+              value={bulkCategoryId}
+              onChange={(e) => setBulkCategoryId(e.target.value)}
+              options={[
+                { value: "", label: "Todas" },
+                ...categories.map((c) => ({
+                  value: c.id,
+                  label: `${c.name} ($${c.price} / $${c.wholesalePrice ?? c.price})`,
+                })),
+              ]}
+              className="sm:col-span-2"
+            />
+
+            <Field
+              label="Cantidades por talla"
+              value={bulkTallaQtyText}
+              onChange={(e) => setBulkTallaQtyText(e.target.value)}
+              placeholder="Ej. 30 o 22=10,24=10,26=5"
+              className="sm:col-span-2"
+            />
+
+            <div className="sm:col-span-2 text-sm font-semibold text-slate-600">
+              Productos:{" "}
+              <span className="font-extrabold tabular-nums">
+                {productsForBulk.length}
+              </span>{" "}
+              · Total estimado:{" "}
+              <span className="font-extrabold tabular-nums">
+                {bulkTotalPreview}
+              </span>{" "}
+              · Hojas estimadas:{" "}
+              <span className="font-extrabold tabular-nums">
+                {bulkPagesPreview}
+              </span>
+            </div>
+
+            <div className="sm:col-span-2">
+              <BigButton className="w-full" onClick={addBulkToSheet}>
+                Agregar masivo a hoja
               </BigButton>
             </div>
           </div>
