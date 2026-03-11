@@ -265,7 +265,7 @@ export default function PosDemoPage() {
             teclado.
           </div>
         </div>
-        <div className="no-print rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+        <div className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200 print:hidden">
           Total: <span className="font-extrabold tabular-nums">${total}</span> ·
           Artículos:{" "}
           <span className="font-extrabold tabular-nums">{itemsCount}</span>
@@ -275,7 +275,7 @@ export default function PosDemoPage() {
       {message ? (
         <div
           className={[
-            "no-print rounded-2xl px-4 py-4 text-base font-extrabold",
+            "rounded-2xl px-4 py-4 text-base font-extrabold print:hidden",
             message.type === "error"
               ? "bg-rose-600 text-white"
               : "bg-emerald-600 text-white",
@@ -361,7 +361,7 @@ export default function PosDemoPage() {
             ) : null}
           </div>
 
-          <div className="no-print rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+          <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200 print:hidden">
             <div className="text-sm font-extrabold text-slate-700">
               Códigos mock
             </div>

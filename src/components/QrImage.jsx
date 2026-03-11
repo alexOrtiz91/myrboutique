@@ -42,7 +42,10 @@ export default function QrImage({ text, className = "" }) {
   if (!dataUrl)
     return (
       <div
-        className={["h-24 w-full rounded-xl bg-slate-100", className].join(" ")}
+        className={[
+          "aspect-square w-full rounded-xl bg-slate-100",
+          className,
+        ].join(" ")}
       />
     );
 

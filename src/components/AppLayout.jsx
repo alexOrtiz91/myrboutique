@@ -28,7 +28,7 @@ function NavItem({ to, label }) {
 export default function AppLayout({ children }) {
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-slate-50 text-slate-900">
-      <header className="no-print sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur print:hidden">
         <div className="w-full px-4 sm:px-6 py-4 lg:mx-auto lg:max-w-7xl">
           <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center justify-between sm:shrink-0">
@@ -56,7 +56,7 @@ export default function AppLayout({ children }) {
         </div>
       </header>
 
-      <main className="w-full px-4 sm:px-6 py-6 lg:mx-auto lg:max-w-7xl">
+      <main className="w-full px-4 py-6 sm:px-6 lg:mx-auto lg:max-w-7xl print:mx-0 print:max-w-none print:px-0 print:py-0">
         {children}
       </main>
     </div>

@@ -1652,7 +1652,7 @@ export default function TiendaAdminPage() {
     <div className="space-y-5">
       <h1 className="text-2xl font-extrabold tracking-tight">Tienda Admin</h1>
 
-      <div className="no-print flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-3 print:hidden">
         <TabButton
           active={tab === "catalogos"}
           onClick={() => setTab("catalogos")}
