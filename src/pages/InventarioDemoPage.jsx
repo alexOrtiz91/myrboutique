@@ -1,0 +1,304 @@
+import { useEffect, useMemo, useState } from "react";
+import BigButton from "../components/BigButton.jsx";
+import Field from "../components/Field.jsx";
+import SelectField from "../components/SelectField.jsx";
+import { apiGet, apiSend } from "../api.js";
+import { getCategoryById } from "../mocks/catalog.js";
+
+const STORAGE_KEY = "myrboutique:tienda-admin:v1";
+
+function readJson(key) {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return null;
+    const raw = storage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(key, value) {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return;
+    storage.setItem(key, JSON.stringify(value));
+  } catch {
+    return;
+  }
+}
+
+function getProfileById(profiles, id) {
+  return profiles.find((p) => p.id === id) || null;
+}
+
+function getDefaultProfileId(profiles) {
+  return profiles?.[0]?.id || "";
+}
+
+function guessProfileIdFromCategory(category, profiles) {
+  if (
+    category?.sizeProfileId &&
+    getProfileById(profiles, category.sizeProfileId)
+  ) {
+    return category.sizeProfileId;
+  }
+  return getDefaultProfileId(profiles);
+}
+
+export default function InventarioDemoPage() {
+  const [persisted] = useState(() => readJson(STORAGE_KEY));
+  const [dataSource, setDataSource] = useState("local");
+
+  const persistedProfiles = useMemo(() => {
+    return Array.isArray(persisted?.sizeProfiles) ? persisted.sizeProfiles : [];
+  }, [persisted]);
+
+  const [categories, setCategories] = useState(() => {
+    if (Array.isArray(persisted?.categories) && persisted.categories.length)
+      return persisted.categories;
+    return [];
+  });
+
+  const [products, setProducts] = useState(() => {
+    const base =
+      Array.isArray(persisted?.products) && persisted.products.length
+        ? persisted.products
+        : [];
+    return base.map((p) => ({ ...p, name: p?.name ? String(p.name) : "" }));
+  });
+
+  const [stockByProductCode, setStockByProductCode] = useState(() => {
+    if (
+      persisted?.stockByProductCode &&
+      !Array.isArray(persisted.stockByProductCode)
+    )
+      return persisted.stockByProductCode;
+    return {};
+  });
+
+  useEffect(() => {
+    if (dataSource === "api") return;
+    const current = readJson(STORAGE_KEY) || {};
+    writeJson(STORAGE_KEY, { ...current, stockByProductCode });
+  }, [dataSource, stockByProductCode]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await apiGet("/api/db/health");
+        const [catRes, prodRes, stockRes] = await Promise.all([
+          apiGet("/api/catalog/categories"),
+          apiGet("/api/catalog/products"),
+          apiGet("/api/inventory/stock"),
+        ]);
+        if (!alive) return;
+
+        setCategories(catRes?.categories || []);
+        setProducts((prodRes?.products || []).map((p) => ({ ...p, name: "" })));
+        setStockByProductCode(
+          stockRes?.stockByProductCode &&
+            !Array.isArray(stockRes.stockByProductCode)
+            ? stockRes.stockByProductCode
+            : {},
+        );
+        setDataSource("api");
+      } catch {
+        if (!alive) return;
+        setDataSource("local");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const [selectedCategoryId, setSelectedCategoryId] = useState(
+    categories[0]?.id || "",
+  );
+  const [selectedProductCode, setSelectedProductCode] = useState("");
+  const [qty, setQty] = useState("1");
+
+  const effectiveSelectedCategoryId = useMemo(() => {
+    const first = categories[0]?.id || "";
+    if (!first) return "";
+    return categories.some((c) => c.id === selectedCategoryId)
+      ? selectedCategoryId
+      : first;
+  }, [categories, selectedCategoryId]);
+
+  const productsWithDetails = useMemo(() => {
+    return products
+      .map((p) => {
+        const cat = getCategoryById(categories, p.categoryId);
+        const profileId = cat
+          ? guessProfileIdFromCategory(cat, persistedProfiles)
+          : "";
+        const profile = profileId
+          ? getProfileById(persistedProfiles, profileId)
+          : null;
+        return {
+          ...p,
+          genero: profile?.genero || "",
+          categoryName: cat?.name || p.categoryId,
+          price: cat?.price ?? 0,
+          stock: stockByProductCode?.[p.code] ?? 0,
+        };
+      })
+      .sort((a, b) => String(a.code).localeCompare(String(b.code)));
+  }, [products, categories, persistedProfiles, stockByProductCode]);
+
+  const productsForSelection = useMemo(() => {
+    return productsWithDetails.filter((p) =>
+      effectiveSelectedCategoryId
+        ? p.categoryId === effectiveSelectedCategoryId
+        : true,
+    );
+  }, [productsWithDetails, effectiveSelectedCategoryId]);
+
+  const effectiveSelectedProductCode = useMemo(() => {
+    const first = productsForSelection[0]?.code || "";
+    if (!first) return "";
+    return productsForSelection.some((p) => p.code === selectedProductCode)
+      ? selectedProductCode
+      : first;
+  }, [productsForSelection, selectedProductCode]);
+
+  async function adjustStock(delta) {
+    const n = Number(qty || 0);
+    if (!effectiveSelectedProductCode) return;
+    if (!Number.isFinite(n) || n <= 0) return;
+    const d = delta * n;
+    if (dataSource === "api") {
+      try {
+        const r = await apiSend("/api/inventory/adjust", "POST", {
+          code: effectiveSelectedProductCode,
+          delta: d,
+          reason: "inventario_demo_adjust",
+        });
+        const nextQty = Number(r?.qty ?? 0);
+        setStockByProductCode((prev) => ({
+          ...(prev || {}),
+          [effectiveSelectedProductCode]: nextQty,
+        }));
+      } catch (e) {
+        window.alert(String(e?.message || e));
+      }
+      return;
+    }
+    setStockByProductCode((prev) => {
+      const current = prev?.[effectiveSelectedProductCode] ?? 0;
+      return {
+        ...(prev || {}),
+        [effectiveSelectedProductCode]: Math.max(0, current + d),
+      };
+    });
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-extrabold tracking-tight">
+          Inventario Demo
+        </h1>
+        <div className="mt-1 text-sm font-semibold text-slate-600">
+          Ajuste rápido por producto (persistente en este dispositivo).
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200 sm:p-6">
+          <div className="text-lg font-extrabold tracking-tight">
+            Ajuste rápido
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <SelectField
+              label="Categoría"
+              value={effectiveSelectedCategoryId}
+              onChange={(e) => setSelectedCategoryId(e.target.value)}
+              options={categories.map((c) => ({ value: c.id, label: c.name }))}
+            />
+            <SelectField
+              label="Producto"
+              value={effectiveSelectedProductCode}
+              onChange={(e) => setSelectedProductCode(e.target.value)}
+              options={productsForSelection.map((p) => ({
+                value: p.code,
+                label: `${p.talla ? `Talla ${p.talla}` : "—"}`,
+              }))}
+              className="sm:col-span-2"
+            />
+
+            <Field
+              label="Cantidad"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              inputMode="numeric"
+              placeholder="Ej. 1"
+            />
+
+            <div className="grid grid-cols-2 gap-3 sm:col-span-2">
+              <BigButton className="w-full" onClick={() => adjustStock(+1)}>
+                + Agregar
+              </BigButton>
+              <BigButton
+                className="w-full"
+                variant="danger"
+                onClick={() => adjustStock(-1)}
+              >
+                - Quitar
+              </BigButton>
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-4">
+          <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200 sm:p-6">
+            <div className="text-lg font-extrabold tracking-tight">
+              Inventario por producto
+            </div>
+            <div className="mt-4 overflow-hidden rounded-2xl ring-1 ring-slate-200">
+              <div className="grid grid-cols-12 bg-slate-50 px-4 py-3 text-xs font-extrabold uppercase tracking-wide text-slate-600">
+                <div className="col-span-1">No.</div>
+                <div className="col-span-2">Género</div>
+                <div className="col-span-6">Categoría</div>
+                <div className="col-span-1">Talla</div>
+                <div className="col-span-1 text-right">Precio</div>
+                <div className="col-span-1 text-right">Stock</div>
+              </div>
+              <div className="divide-y divide-slate-200 bg-white">
+                {productsWithDetails.map((p) => (
+                  <div
+                    key={p.code}
+                    className="grid grid-cols-12 px-4 py-3 text-base font-semibold"
+                  >
+                    <div className="col-span-1 tabular-nums">{p.code}</div>
+                    <div className="col-span-2">{p.genero || "—"}</div>
+                    <div className="col-span-6 text-slate-600">
+                      {p.categoryName}
+                    </div>
+                    <div className="col-span-1">{p.talla || "—"}</div>
+                    <div className="col-span-1 text-right tabular-nums">
+                      ${p.price}
+                    </div>
+                    <div className="col-span-1 text-right tabular-nums">
+                      {p.stock}
+                    </div>
+                  </div>
+                ))}
+                {!productsWithDetails.length ? (
+                  <div className="px-4 py-4 text-sm font-semibold text-slate-600">
+                    Sin productos
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
