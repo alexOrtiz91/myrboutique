@@ -603,6 +603,10 @@ export default function TiendaAdminPage() {
   const [stockProductCode, setStockProductCode] = useState("");
   const [stockDelta, setStockDelta] = useState("");
 
+  const [editingInventoryProductCode, setEditingInventoryProductCode] =
+    useState(null);
+  const [inventoryStockDraft, setInventoryStockDraft] = useState("");
+
   const [selectedCatalogCategoryId, setSelectedCatalogCategoryId] =
     useState(null);
   const [selectedProfileId, setSelectedProfileId] = useState(null);
@@ -630,6 +634,12 @@ export default function TiendaAdminPage() {
     setEditingProfileId(null);
     setSelectedProductCode(null);
     setEditingProductCode(null);
+    setEditingInventoryProductCode(null);
+    setInventoryStockDraft("");
+  }, []);
+
+  const closeInventoryAdjustRow = useCallback(() => {
+    setEditingInventoryProductCode(null);
   }, []);
 
   const openCreateCategory = useCallback(() => {
@@ -684,6 +694,10 @@ export default function TiendaAdminPage() {
   const quickAdjustLayerRef = useDismissableLayer(
     isQuickAdjustOpen,
     closeAllCatalogForms,
+  );
+  const inventoryAdjustLayerRef = useDismissableLayer(
+    Boolean(editingInventoryProductCode),
+    closeInventoryAdjustRow,
   );
   const createBranchLayerRef = useDismissableLayer(
     isCreateBranchOpen,
@@ -748,6 +762,75 @@ export default function TiendaAdminPage() {
     });
   }, [products, categories, sizeProfiles, stockByProductCode]);
 
+  const productsForInventory = useMemo(() => {
+    const categoryNameById = {};
+    for (const c of categories || []) {
+      const id = String(c?.id || "").trim();
+      if (!id) continue;
+      categoryNameById[id] = String(c?.name || "").trim();
+    }
+
+    const tallaOrderByCategoryId = {};
+    for (const c of categories || []) {
+      const id = String(c?.id || "").trim();
+      if (!id) continue;
+      const profileId = guessProfileIdFromCategory(c, sizeProfiles);
+      const profile = getProfileById(sizeProfiles, profileId);
+      const tallas = getProfileTallas(profile);
+      const map = {};
+      for (let i = 0; i < tallas.length; i += 1) {
+        const t = String(tallas[i] || "").trim();
+        if (!t) continue;
+        map[t] = i;
+      }
+      tallaOrderByCategoryId[id] = map;
+    }
+
+    const collator = new Intl.Collator("es", { sensitivity: "base" });
+    return [...productsWithDetails].sort((a, b) => {
+      const categoryA =
+        categoryNameById[String(a?.categoryId || "").trim()] ||
+        String(a?.categoryName || "").trim() ||
+        "—";
+      const categoryB =
+        categoryNameById[String(b?.categoryId || "").trim()] ||
+        String(b?.categoryName || "").trim() ||
+        "—";
+      const categoryCmp = collator.compare(categoryA, categoryB);
+      if (categoryCmp) return categoryCmp;
+
+      const tallaA = String(a?.talla || "").trim();
+      const tallaB = String(b?.talla || "").trim();
+      const map =
+        tallaOrderByCategoryId[String(a?.categoryId || "").trim()] || {};
+      const rankA = Object.prototype.hasOwnProperty.call(map, tallaA)
+        ? map[tallaA]
+        : null;
+      const rankB = Object.prototype.hasOwnProperty.call(map, tallaB)
+        ? map[tallaB]
+        : null;
+      if (rankA !== null && rankB !== null) return rankA - rankB;
+      if (rankA !== null) return -1;
+      if (rankB !== null) return 1;
+
+      const aIsNumeric = isNumericSizeValue(tallaA);
+      const bIsNumeric = isNumericSizeValue(tallaB);
+      if (aIsNumeric && bIsNumeric) {
+        const na = Number(tallaA);
+        const nb = Number(tallaB);
+        if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb)
+          return na - nb;
+      }
+      if (aIsNumeric && !bIsNumeric) return -1;
+      if (!aIsNumeric && bIsNumeric) return 1;
+
+      const tallaCmp = collator.compare(tallaA, tallaB);
+      if (tallaCmp) return tallaCmp;
+
+      return collator.compare(String(a?.code || ""), String(b?.code || ""));
+    });
+  }, [productsWithDetails, categories, sizeProfiles]);
+
   const productHasStock = useMemo(() => {
     const out = {};
     const src = stockByProductCode || {};
@@ -768,12 +851,12 @@ export default function TiendaAdminPage() {
   }, [productsWithDetails]);
 
   const productsForStockSelection = useMemo(() => {
-    return productsWithDetails.filter((p) =>
+    return productsForInventory.filter((p) =>
       effectiveStockCategoryId
         ? p.categoryId === effectiveStockCategoryId
         : true,
     );
-  }, [productsWithDetails, effectiveStockCategoryId]);
+  }, [productsForInventory, effectiveStockCategoryId]);
 
   function normalizeCategoriesFromApi(rawCategories, fallbackProfileId) {
     return (rawCategories || []).map((c) => {
@@ -1610,6 +1693,78 @@ export default function TiendaAdminPage() {
       setNewCategorySizeProfile(fallbackId);
     if (editCategoryProfileId === profileId)
       setEditCategoryProfileId(fallbackId);
+  }
+
+  function beginInventoryAdjustRow(product) {
+    const code = String(product?.code || "").trim();
+    if (!code) return;
+    closeAllCatalogForms();
+    setEditingInventoryProductCode(code);
+    const current = Number(stockByProductCode?.[code] ?? 0);
+    const safeCurrent =
+      Number.isFinite(current) && current >= 0 ? Math.floor(current) : 0;
+    setInventoryStockDraft(String(safeCurrent));
+  }
+
+  function bumpInventoryDraft(delta) {
+    const n = Number.parseInt(String(inventoryStockDraft || 0), 10);
+    const base = Number.isFinite(n) && n >= 0 ? n : 0;
+    const next = Math.max(0, base + delta);
+    setInventoryStockDraft(String(next));
+  }
+
+  async function saveInventoryAdjustRow() {
+    const code = String(editingInventoryProductCode || "").trim();
+    if (!code) return;
+
+    const desired = Number.parseInt(String(inventoryStockDraft || 0), 10);
+    if (!Number.isFinite(desired) || desired < 0) {
+      window.alert("Stock inválido");
+      return;
+    }
+
+    const currentRaw = Number(stockByProductCode?.[code] ?? 0);
+    const current =
+      Number.isFinite(currentRaw) && currentRaw >= 0 ? currentRaw : 0;
+    const delta = desired - current;
+    if (!delta) {
+      closeInventoryAdjustRow();
+      return;
+    }
+
+    if (delta < 0) {
+      const ok = window.confirm(
+        `¿Seguro que quieres quitar ${Math.abs(delta)} de stock?`,
+      );
+      if (!ok) return;
+    }
+
+    if (dataSource === "api") {
+      try {
+        const r = await apiSend(
+          `/api/inventory/adjust?branchId=${encodeURIComponent(effectiveBranchId)}`,
+          "POST",
+          {
+            code,
+            delta,
+            reason: "admin_row_adjust",
+          },
+        );
+        const nextQty = Number(r?.qty ?? desired);
+        setStockByProductCode((prev) => ({ ...(prev || {}), [code]: nextQty }));
+        closeInventoryAdjustRow();
+      } catch (e) {
+        window.alert(String(e?.message || e));
+      }
+      return;
+    }
+
+    setStockByProductCode((prev) => {
+      const prevQty = Number(prev?.[code] ?? 0);
+      const safePrev = Number.isFinite(prevQty) && prevQty >= 0 ? prevQty : 0;
+      return { ...(prev || {}), [code]: Math.max(0, safePrev + delta) };
+    });
+    closeInventoryAdjustRow();
   }
 
   async function adjustStock(delta) {
@@ -2531,25 +2686,134 @@ export default function TiendaAdminPage() {
                   <div className="col-span-1 text-right">Stock</div>
                 </div>
                 <div className="divide-y divide-slate-200 bg-white">
-                  {productsWithDetails.map((p) => (
-                    <div
-                      key={p.code}
-                      className="grid grid-cols-12 px-4 py-3 text-base font-semibold"
-                    >
-                      <div className="col-span-1 tabular-nums">{p.code}</div>
-                      <div className="col-span-2">{p.genero || "—"}</div>
-                      <div className="col-span-6 text-slate-600">
-                        {p.categoryName}
+                  {productsForInventory.map((p) => {
+                    const isEditing =
+                      String(p?.code || "").trim() ===
+                        String(editingInventoryProductCode || "").trim() &&
+                      Boolean(editingInventoryProductCode);
+                    return (
+                      <div
+                        key={p.code}
+                        ref={isEditing ? inventoryAdjustLayerRef : null}
+                        className={isEditing ? "bg-slate-50" : ""}
+                      >
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => {
+                            if (isEditing) {
+                              closeInventoryAdjustRow();
+                              return;
+                            }
+                            beginInventoryAdjustRow(p);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              if (isEditing) {
+                                closeInventoryAdjustRow();
+                                return;
+                              }
+                              beginInventoryAdjustRow(p);
+                            }
+                          }}
+                          className="grid grid-cols-12 px-4 py-3 text-base font-semibold cursor-pointer"
+                        >
+                          <div className="col-span-1 tabular-nums">
+                            {p.code}
+                          </div>
+                          <div className="col-span-2">{p.genero || "—"}</div>
+                          <div className="col-span-6 text-slate-600">
+                            {p.categoryName}
+                          </div>
+                          <div className="col-span-1">{p.talla || "—"}</div>
+                          <div className="col-span-1 text-right tabular-nums">
+                            {p.price === null ? "—" : `$${p.price}`}
+                          </div>
+                          <div className="col-span-1 text-right tabular-nums">
+                            {p.stock}
+                          </div>
+                        </div>
+
+                        {isEditing ? (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="px-4 pb-4"
+                          >
+                            <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-6 sm:items-end">
+                                <div className="sm:col-span-3">
+                                  <div className="text-sm font-extrabold text-slate-700">
+                                    Stock
+                                  </div>
+                                  <input
+                                    value={inventoryStockDraft}
+                                    onChange={(e) =>
+                                      setInventoryStockDraft(e.target.value)
+                                    }
+                                    inputMode="numeric"
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    className={[
+                                      "mt-2 h-12 w-full rounded-2xl bg-white px-4 text-base font-semibold",
+                                      "ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900",
+                                    ].join(" ")}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        void saveInventoryAdjustRow();
+                                      }
+                                      if (e.key === "Escape") {
+                                        e.preventDefault();
+                                        closeInventoryAdjustRow();
+                                      }
+                                    }}
+                                  />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 sm:col-span-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => bumpInventoryDraft(-1)}
+                                    className="h-12 rounded-2xl bg-white text-base font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
+                                  >
+                                    −
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => bumpInventoryDraft(+1)}
+                                    className="h-12 rounded-2xl bg-white text-base font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 sm:col-span-6">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void saveInventoryAdjustRow()
+                                    }
+                                    className="h-12 rounded-2xl bg-slate-900 px-4 text-sm font-extrabold text-white active:scale-[0.99]"
+                                  >
+                                    Guardar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={closeInventoryAdjustRow}
+                                    className="h-12 rounded-2xl bg-white px-4 text-sm font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
-                      <div className="col-span-1">{p.talla || "—"}</div>
-                      <div className="col-span-1 text-right tabular-nums">
-                        {p.price === null ? "—" : `$${p.price}`}
-                      </div>
-                      <div className="col-span-1 text-right tabular-nums">
-                        {p.stock}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {!productsWithDetails.length ? (
                     <div className="px-4 py-4 text-sm font-semibold text-slate-600">
                       Sin productos
