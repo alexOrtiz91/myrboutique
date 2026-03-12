@@ -4,12 +4,24 @@ export default function ScannerCapture({
   onScan,
   className = "",
   autoFocus = true,
+  globalCapture = true,
+  hideUI = false,
   placeholder = "Listo para escanear…",
 }) {
   const inputRef = useRef(null);
+  const onScanRef = useRef(onScan);
+  const bufferRef = useRef("");
   const [buffer, setBuffer] = useState("");
   const [lastScan, setLastScan] = useState("");
   const [lastAt, setLastAt] = useState(null);
+
+  useEffect(() => {
+    onScanRef.current = onScan;
+  }, [onScan]);
+
+  useEffect(() => {
+    bufferRef.current = buffer;
+  }, [buffer]);
 
   const lastAtLabel = useMemo(() => {
     if (!lastAt) return "";
@@ -26,8 +38,26 @@ export default function ScannerCapture({
 
   useEffect(() => {
     if (!autoFocus) return;
-    const t = setTimeout(() => inputRef.current?.focus(), 50);
-    return () => clearTimeout(t);
+    const focusInput = () => {
+      if (!inputRef.current) return;
+      if (document.activeElement === inputRef.current) return;
+      inputRef.current.focus();
+    };
+
+    focusInput();
+
+    const interval = window.setInterval(focusInput, 500);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") focusInput();
+    };
+    window.addEventListener("focus", focusInput);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", focusInput);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [autoFocus]);
 
   function commitScan(code) {
@@ -35,31 +65,79 @@ export default function ScannerCapture({
     if (!normalized) return;
     setLastScan(normalized);
     setLastAt(new Date());
+    bufferRef.current = "";
     setBuffer("");
-    onScan?.(normalized);
+    onScanRef.current?.(normalized);
+  }
+
+  function updateBuffer(next) {
+    const v = String(next || "");
+    bufferRef.current = v;
+    setBuffer(v);
   }
 
   function onKeyDown(e) {
     if (e.key === "Enter") {
       e.preventDefault();
-      commitScan(buffer);
+      commitScan(bufferRef.current);
       return;
     }
 
     if (e.key === "Escape") {
-      setBuffer("");
+      updateBuffer("");
       return;
     }
 
     if (e.key === "Backspace") {
-      setBuffer((v) => v.slice(0, -1));
+      updateBuffer(bufferRef.current.slice(0, -1));
       return;
     }
 
     if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      setBuffer((v) => v + e.key);
+      updateBuffer(bufferRef.current + e.key);
     }
   }
+
+  useEffect(() => {
+    if (!globalCapture) return;
+    function onWindowKeyDown(e) {
+      const el = e?.target;
+      const tag = String(el?.tagName || "").toLowerCase();
+      const isTypingTarget =
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        Boolean(el?.isContentEditable);
+      if (isTypingTarget) return;
+      onKeyDown(e);
+    }
+    window.addEventListener("keydown", onWindowKeyDown, true);
+    return () => window.removeEventListener("keydown", onWindowKeyDown, true);
+  }, [globalCapture]);
+
+  const inputEl = (
+    <input
+      ref={inputRef}
+      value=""
+      onChange={() => {}}
+      onKeyDown={onKeyDown}
+      inputMode="none"
+      autoComplete="off"
+      autoCorrect="off"
+      autoCapitalize="off"
+      spellCheck={false}
+      onBlur={() => {
+        if (autoFocus) {
+          window.setTimeout(() => inputRef.current?.focus(), 50);
+        }
+      }}
+      className="absolute opacity-0 pointer-events-none"
+      aria-hidden="true"
+      tabIndex={0}
+    />
+  );
+
+  if (hideUI) return inputEl;
 
   return (
     <div
@@ -68,23 +146,7 @@ export default function ScannerCapture({
         className,
       ].join(" ")}
     >
-      <input
-        ref={inputRef}
-        value=""
-        onChange={() => {}}
-        onKeyDown={onKeyDown}
-        inputMode="none"
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        onBlur={() => {
-          if (autoFocus) inputRef.current?.focus();
-        }}
-        className="absolute -left-[9999px] top-0 h-0 w-0 opacity-0"
-        aria-hidden="true"
-        tabIndex={-1}
-      />
+      {inputEl}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
@@ -106,13 +168,6 @@ export default function ScannerCapture({
             </div>
           ) : null}
         </div>
-        <button
-          type="button"
-          onClick={() => inputRef.current?.focus()}
-          className="rounded-2xl bg-slate-900 px-5 py-4 text-lg font-extrabold text-white"
-        >
-          Activar escaneo
-        </button>
       </div>
     </div>
   );

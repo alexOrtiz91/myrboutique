@@ -9,6 +9,7 @@ import {
 } from "../mocks/catalog.js";
 
 const STORAGE_KEY = "myrboutique:tienda-admin:v1";
+const POS_STORAGE_KEY = "myrboutique:pos-demo:v1";
 const WHOLESALE_MIN_QTY = 15;
 
 function readJson(key) {
@@ -20,6 +21,16 @@ function readJson(key) {
     return JSON.parse(raw);
   } catch {
     return null;
+  }
+}
+
+function writeJson(key, value) {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return;
+    storage.setItem(key, JSON.stringify(value));
+  } catch {
+    void 0;
   }
 }
 
@@ -61,6 +72,7 @@ function TicketRow({ item, onDec, onInc }) {
 
 export default function PosDemoPage() {
   const [persisted] = useState(() => readJson(STORAGE_KEY));
+  const [persistedPos] = useState(() => readJson(POS_STORAGE_KEY));
   const [categories, setCategories] = useState(() => {
     const base =
       Array.isArray(persisted?.categories) && persisted.categories.length
@@ -89,9 +101,16 @@ export default function PosDemoPage() {
         : [];
     return base.map((p) => ({ ...p, name: p?.name ? String(p.name) : "" }));
   });
-  const [ticket, setTicket] = useState([]);
+  const [ticket, setTicket] = useState(() => {
+    const base = persistedPos?.ticket;
+    return Array.isArray(base) ? base : [];
+  });
   const [message, setMessage] = useState(null);
   const [lastPayment, setLastPayment] = useState(null);
+
+  useEffect(() => {
+    writeJson(POS_STORAGE_KEY, { ticket });
+  }, [ticket]);
 
   useEffect(() => {
     let alive = true;
@@ -135,10 +154,13 @@ export default function PosDemoPage() {
     };
   }, []);
 
-  const ticketWithPrices = useMemo(() => {
-    const pieces = ticket.reduce((sum, i) => sum + (Number(i.qty) || 0), 0);
-    const wholesaleApplied = pieces >= WHOLESALE_MIN_QTY;
+  const pieces = useMemo(
+    () => ticket.reduce((sum, i) => sum + (Number(i.qty) || 0), 0),
+    [ticket],
+  );
+  const wholesaleApplied = pieces >= WHOLESALE_MIN_QTY;
 
+  const ticketWithPrices = useMemo(() => {
     return ticket.map((i) => {
       const normalPrice = Number(i.price ?? 0);
       const safeNormalPrice =
@@ -160,6 +182,36 @@ export default function PosDemoPage() {
       };
     });
   }, [ticket]);
+
+  const normalTotal = useMemo(() => {
+    return ticket.reduce((sum, i) => {
+      const qty = Number(i.qty) || 0;
+      const normalPrice = Number(i.price ?? 0);
+      const safeNormalPrice =
+        Number.isFinite(normalPrice) && normalPrice >= 0 ? normalPrice : 0;
+      return sum + qty * safeNormalPrice;
+    }, 0);
+  }, [ticket]);
+
+  const wholesaleTotal = useMemo(() => {
+    return ticket.reduce((sum, i) => {
+      const qty = Number(i.qty) || 0;
+      const normalPrice = Number(i.price ?? 0);
+      const safeNormalPrice =
+        Number.isFinite(normalPrice) && normalPrice >= 0 ? normalPrice : 0;
+      const wholesaleCandidate = Number(i.wholesalePrice ?? safeNormalPrice);
+      const safeWholesalePrice =
+        Number.isFinite(wholesaleCandidate) && wholesaleCandidate >= 0
+          ? wholesaleCandidate
+          : safeNormalPrice;
+      return sum + qty * safeWholesalePrice;
+    }, 0);
+  }, [ticket]);
+
+  const discountApplied = useMemo(() => {
+    if (!wholesaleApplied) return 0;
+    return Math.max(0, normalTotal - wholesaleTotal);
+  }, [wholesaleApplied, normalTotal, wholesaleTotal]);
 
   const total = useMemo(
     () => ticketWithPrices.reduce((sum, i) => sum + i.lineTotal, 0),
@@ -269,6 +321,24 @@ export default function PosDemoPage() {
           Total: <span className="font-extrabold tabular-nums">${total}</span> ·
           Artículos:{" "}
           <span className="font-extrabold tabular-nums">{itemsCount}</span>
+          {wholesaleApplied ? (
+            <>
+              {" "}
+              ·{" "}
+              <span className="font-extrabold text-emerald-700">
+                Mayoreo aplicado (-${discountApplied})
+              </span>
+            </>
+          ) : (
+            <>
+              {" "}
+              · Mayoreo desde{" "}
+              <span className="font-extrabold tabular-nums">
+                {WHOLESALE_MIN_QTY}
+              </span>
+              +
+            </>
+          )}
         </div>
       </div>
 
@@ -285,7 +355,7 @@ export default function PosDemoPage() {
         </div>
       ) : null}
 
-      <ScannerCapture onScan={addByScan} />
+      <ScannerCapture onScan={addByScan} hideUI />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section className="space-y-3">
@@ -333,6 +403,14 @@ export default function PosDemoPage() {
               <div className="mt-1 text-3xl font-extrabold tabular-nums">
                 ${total}
               </div>
+              {wholesaleApplied ? (
+                <div className="mt-2 text-sm font-semibold text-emerald-700">
+                  Descuento mayoreo aplicado: -$
+                  <span className="font-extrabold tabular-nums">
+                    {discountApplied}
+                  </span>
+                </div>
+              ) : null}
               <div className="mt-1 text-sm font-semibold text-slate-600">
                 Items:{" "}
                 <span className="font-extrabold tabular-nums">
@@ -359,24 +437,6 @@ export default function PosDemoPage() {
                 </div>
               </div>
             ) : null}
-          </div>
-
-          <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200 print:hidden">
-            <div className="text-sm font-extrabold text-slate-700">
-              Códigos mock
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-sm font-semibold text-slate-700 sm:grid-cols-4">
-              {products.map((p) => (
-                <button
-                  key={p.code}
-                  type="button"
-                  onClick={() => addByScan(p.code)}
-                  className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200 active:scale-[0.99]"
-                >
-                  {p.code}
-                </button>
-              ))}
-            </div>
           </div>
         </section>
       </div>
