@@ -203,6 +203,7 @@ function SortableTallaRow({ id, value, onRemove }) {
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -221,11 +222,12 @@ function SortableTallaRow({ id, value, onRemove }) {
         "flex touch-none select-none items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-bold ring-1",
         isDragging ? "ring-amber-300" : "ring-slate-200",
       ].join(" ")}
-      {...attributes}
-      {...listeners}
     >
       <div
         aria-hidden="true"
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
         className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-extrabold text-slate-700 ring-1 ring-slate-200"
       >
         ≡
@@ -244,13 +246,23 @@ function SortableTallaRow({ id, value, onRemove }) {
   );
 }
 
-function ReorderableTallasList({ profileId, values, onCommit, onRemove }) {
+function ReorderableTallasList({
+  profileId,
+  values,
+  onCommit,
+  onRemove,
+  onRename,
+}) {
   const [items, setItems] = useState(() => uniqueOrdered(values));
   const [reorderMode, setReorderMode] = useState(false);
+  const [editingValue, setEditingValue] = useState(null);
+  const [draftValue, setDraftValue] = useState("");
 
   useEffect(() => {
     setItems(uniqueOrdered(values));
     setReorderMode(false);
+    setEditingValue(null);
+    setDraftValue("");
   }, [profileId, values]);
 
   const sensors = useSensors(
@@ -356,16 +368,79 @@ function ReorderableTallasList({ profileId, values, onCommit, onRemove }) {
               >
                 ≡
               </div>
-              <div className="min-w-0 flex-1">{v}</div>
-              <button
-                type="button"
-                onPointerDownCapture={(e) => e.stopPropagation()}
-                onTouchStartCapture={(e) => e.stopPropagation()}
-                onClick={() => onRemove(profileId, v)}
-                className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-extrabold text-slate-700 ring-1 ring-slate-200"
-              >
-                Quitar
-              </button>
+              {editingValue === v ? (
+                <>
+                  <input
+                    value={draftValue}
+                    onChange={(e) => setDraftValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const to = String(draftValue || "").trim();
+                        if (to) onRename(profileId, v, to);
+                        setEditingValue(null);
+                        setDraftValue("");
+                      }
+                      if (e.key === "Escape") {
+                        setEditingValue(null);
+                        setDraftValue("");
+                      }
+                    }}
+                    className="min-w-0 flex-1 rounded-lg bg-white px-2 py-1 text-sm font-bold text-slate-900 ring-1 ring-slate-200 outline-none"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onPointerDownCapture={(e) => e.stopPropagation()}
+                    onTouchStartCapture={(e) => e.stopPropagation()}
+                    onClick={() => {
+                      const to = String(draftValue || "").trim();
+                      if (to) onRename(profileId, v, to);
+                      setEditingValue(null);
+                      setDraftValue("");
+                    }}
+                    className="rounded-lg bg-white px-2 py-1 text-xs font-extrabold text-slate-900 ring-1 ring-slate-200"
+                  >
+                    Guardar
+                  </button>
+                  <button
+                    type="button"
+                    onPointerDownCapture={(e) => e.stopPropagation()}
+                    onTouchStartCapture={(e) => e.stopPropagation()}
+                    onClick={() => {
+                      setEditingValue(null);
+                      setDraftValue("");
+                    }}
+                    className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-extrabold text-slate-700 ring-1 ring-slate-200"
+                  >
+                    Cancelar
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="min-w-0 flex-1">{v}</div>
+                  <button
+                    type="button"
+                    onPointerDownCapture={(e) => e.stopPropagation()}
+                    onTouchStartCapture={(e) => e.stopPropagation()}
+                    onClick={() => {
+                      setEditingValue(v);
+                      setDraftValue(v);
+                    }}
+                    className="rounded-lg bg-white px-2 py-1 text-xs font-extrabold text-slate-900 ring-1 ring-slate-200"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    onPointerDownCapture={(e) => e.stopPropagation()}
+                    onTouchStartCapture={(e) => e.stopPropagation()}
+                    onClick={() => onRemove(profileId, v)}
+                    className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-extrabold text-slate-700 ring-1 ring-slate-200"
+                  >
+                    Quitar
+                  </button>
+                </>
+              )}
             </div>
           ))}
           {!items.length ? (
@@ -1611,6 +1686,66 @@ export default function TiendaAdminPage() {
     }
   }
 
+  async function renameSizeProfileValue(profileId, fromValue, toValue) {
+    const from = String(fromValue || "").trim();
+    const to = String(toValue || "").trim();
+    if (!from || !to) return;
+    if (from === to) return;
+
+    const affectedCategoryIds = new Set(
+      (categories || [])
+        .filter((c) => String(c?.sizeProfileId || "").trim() === profileId)
+        .map((c) => String(c?.id || "").trim())
+        .filter(Boolean),
+    );
+
+    let nextValues = null;
+    setSizeProfiles((prev) =>
+      prev.map((p) => {
+        if (p.id !== profileId) return p;
+        const base = Array.isArray(p.values) ? p.values : [];
+        const renamed = base.map((v) => (String(v) === from ? to : v));
+        nextValues = uniqueOrdered(renamed);
+        return { ...p, values: nextValues };
+      }),
+    );
+
+    if (affectedCategoryIds.size) {
+      setProducts((prev) =>
+        prev.map((p) => {
+          const categoryId = String(p?.categoryId || "").trim();
+          const talla = String(p?.talla || "").trim();
+          if (!affectedCategoryIds.has(categoryId)) return p;
+          if (talla !== from) return p;
+          return { ...p, talla: to };
+        }),
+      );
+    }
+
+    setNewProductTalla((prev) => (String(prev || "").trim() === from ? to : prev));
+    setEditProductTalla((prev) => (String(prev || "").trim() === from ? to : prev));
+
+    if (dataSource === "api") {
+      try {
+        await apiSend(
+          `/api/size-profiles/${encodeURIComponent(profileId)}/rename-value`,
+          "POST",
+          { from, to },
+        );
+        await refreshSizeProfilesFromApi();
+      } catch (e) {
+        window.alert(String(e?.message || e));
+        await refreshSizeProfilesFromApi();
+      }
+    } else {
+      if (Array.isArray(nextValues)) {
+        setSizeProfiles((prev) =>
+          prev.map((p) => (p.id === profileId ? { ...p, values: nextValues } : p)),
+        );
+      }
+    }
+  }
+
   async function deleteSizeProfile(profileId) {
     const profile = sizeProfiles.find((p) => p.id === profileId) || null;
     const nextProfiles = sizeProfiles.filter((p) => p.id !== profileId);
@@ -2230,6 +2365,7 @@ export default function TiendaAdminPage() {
                             values={getProfileTallas(p)}
                             onCommit={setSizeProfileValues}
                             onRemove={removeSizeProfileValue}
+                            onRename={renameSizeProfileValue}
                           />
                         </div>
                       )}

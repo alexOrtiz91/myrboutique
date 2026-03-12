@@ -417,6 +417,98 @@ app.patch("/api/size-profiles/:id", async (req, res) => {
   }
 });
 
+app.post("/api/size-profiles/:id/rename-value", async (req, res) => {
+  const client = pool ? await pool.connect() : null;
+  try {
+    if (!client) throw new Error("DATABASE_URL is not set");
+    const id = String(req.params?.id || "").trim();
+    const from = String(req.body?.from || "").trim();
+    const to = String(req.body?.to || "").trim();
+    if (!id) return res.status(400).json({ error: "invalid_id" });
+    if (!from || !to) return res.status(400).json({ error: "invalid_payload" });
+
+    if (from === to) {
+      const valuesRes = await client.query(
+        `
+          SELECT value
+          FROM size_profile_values
+          WHERE profile_id = $1
+          ORDER BY sort_order ASC, created_at ASC
+        `,
+        [id],
+      );
+      return res.json({
+        profileId: id,
+        values: valuesRes.rows.map((v) => v.value),
+      });
+    }
+
+    await client.query("BEGIN");
+    const existing = await client.query(
+      `SELECT id FROM size_profiles WHERE id = $1 AND active = TRUE`,
+      [id],
+    );
+    if (!existing.rows?.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "not_found" });
+    }
+
+    const toExists = await client.query(
+      `SELECT 1 AS ok FROM size_profile_values WHERE profile_id = $1 AND value = $2 LIMIT 1`,
+      [id, to],
+    );
+    if (toExists.rows?.length) {
+      await client.query(
+        `DELETE FROM size_profile_values WHERE profile_id = $1 AND value = $2`,
+        [id, from],
+      );
+    } else {
+      await client.query(
+        `UPDATE size_profile_values SET value = $3 WHERE profile_id = $1 AND value = $2`,
+        [id, from, to],
+      );
+    }
+
+    await client.query(
+      `
+        UPDATE product_variants pv
+        SET talla = $3
+        FROM categories c
+        WHERE c.id = pv.category_id
+          AND c.size_profile_id = $1
+          AND pv.talla = $2
+          AND pv.active = TRUE
+      `,
+      [id, from, to],
+    );
+
+    const valuesRes = await client.query(
+      `
+        SELECT value
+        FROM size_profile_values
+        WHERE profile_id = $1
+        ORDER BY sort_order ASC, created_at ASC
+      `,
+      [id],
+    );
+
+    await client.query("COMMIT");
+    res.json({
+      profileId: id,
+      values: valuesRes.rows.map((v) => String(v.value)),
+    });
+  } catch (e) {
+    try {
+      if (client) await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      void rollbackError;
+    }
+    res.status(500).json({ error: String(e?.message || e) });
+  } finally {
+    if (client) client.release();
+  }
+});
+
 app.delete("/api/size-profiles/:id", async (req, res) => {
   const client = pool ? await pool.connect() : null;
   try {
