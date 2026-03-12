@@ -33,6 +33,7 @@ CREATE TABLE
     name TEXT NOT NULL,
     price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
     wholesale_price_cents INTEGER NOT NULL CHECK (wholesale_price_cents >= 0),
+    credit_price_cents INTEGER NOT NULL CHECK (credit_price_cents >= 0),
     size_profile_id TEXT,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now ()

@@ -574,7 +574,7 @@ app.get("/api/catalog/categories", async (_req, res) => {
   try {
     const { rows } = await query(
       `
-        SELECT id, name, price_cents, wholesale_price_cents, size_profile_id
+        SELECT id, name, price_cents, wholesale_price_cents, credit_price_cents, size_profile_id
         FROM categories
         WHERE active = TRUE
         ORDER BY name ASC
@@ -586,6 +586,7 @@ app.get("/api/catalog/categories", async (_req, res) => {
         name: r.name,
         price: fromCents(r.price_cents),
         wholesalePrice: fromCents(r.wholesale_price_cents),
+        creditPrice: fromCents(r.credit_price_cents),
         sizeProfileId: r.size_profile_id || null,
       })),
     });
@@ -600,17 +601,23 @@ app.post("/api/catalog/categories", async (req, res) => {
     const name = String(req.body?.name || "").trim();
     const price = toCents(req.body?.price);
     const wholesalePrice = toCents(req.body?.wholesalePrice);
+    const creditPrice =
+      req.body?.creditPrice === undefined ||
+      req.body?.creditPrice === null ||
+      req.body?.creditPrice === ""
+        ? price
+        : toCents(req.body?.creditPrice);
     const sizeProfileId = String(req.body?.sizeProfileId || "").trim() || null;
 
     if (!id || !name) return res.status(400).json({ error: "invalid_payload" });
 
     const { rows } = await query(
       `
-        INSERT INTO categories (id, name, price_cents, wholesale_price_cents, size_profile_id, active)
-        VALUES ($1, $2, $3, $4, $5, TRUE)
-        RETURNING id, name, price_cents, wholesale_price_cents, size_profile_id
+        INSERT INTO categories (id, name, price_cents, wholesale_price_cents, credit_price_cents, size_profile_id, active)
+        VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+        RETURNING id, name, price_cents, wholesale_price_cents, credit_price_cents, size_profile_id
       `,
-      [id, name, price, wholesalePrice, sizeProfileId],
+      [id, name, price, wholesalePrice, creditPrice, sizeProfileId],
     );
 
     const r = rows[0];
@@ -620,6 +627,7 @@ app.post("/api/catalog/categories", async (req, res) => {
         name: r.name,
         price: fromCents(r.price_cents),
         wholesalePrice: fromCents(r.wholesale_price_cents),
+        creditPrice: fromCents(r.credit_price_cents),
         sizeProfileId: r.size_profile_id || null,
       },
     });
@@ -636,6 +644,12 @@ app.patch("/api/catalog/categories/:id", async (req, res) => {
     const name = String(req.body?.name || "").trim();
     const price = toCents(req.body?.price);
     const wholesalePrice = toCents(req.body?.wholesalePrice);
+    const creditPrice =
+      req.body?.creditPrice === undefined ||
+      req.body?.creditPrice === null ||
+      req.body?.creditPrice === ""
+        ? price
+        : toCents(req.body?.creditPrice);
     const sizeProfileId = String(req.body?.sizeProfileId || "").trim() || null;
 
     const { rows } = await query(
@@ -644,11 +658,12 @@ app.patch("/api/catalog/categories/:id", async (req, res) => {
         SET name = $2,
             price_cents = $3,
             wholesale_price_cents = $4,
-            size_profile_id = $5
+            credit_price_cents = $5,
+            size_profile_id = $6
         WHERE id = $1
-        RETURNING id, name, price_cents, wholesale_price_cents, size_profile_id
+        RETURNING id, name, price_cents, wholesale_price_cents, credit_price_cents, size_profile_id
       `,
-      [id, name, price, wholesalePrice, sizeProfileId],
+      [id, name, price, wholesalePrice, creditPrice, sizeProfileId],
     );
 
     const r = rows[0];
@@ -659,6 +674,7 @@ app.patch("/api/catalog/categories/:id", async (req, res) => {
         name: r.name,
         price: fromCents(r.price_cents),
         wholesalePrice: fromCents(r.wholesale_price_cents),
+        creditPrice: fromCents(r.credit_price_cents),
         sizeProfileId: r.size_profile_id || null,
       },
     });

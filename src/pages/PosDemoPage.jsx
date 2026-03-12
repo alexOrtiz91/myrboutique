@@ -41,7 +41,7 @@ function TicketRow({ item, onDec, onInc }) {
         <div className="truncate text-base font-extrabold">{item.name}</div>
         <div className="mt-1 truncate text-sm font-semibold text-slate-600">
           {item.categoryName}
-          {item.wholesaleApplied ? " · Mayoreo" : ""}
+          {item.pricingTag ? ` · ${item.pricingTag}` : ""}
         </div>
       </div>
       <div className="col-span-2 text-right text-base font-extrabold tabular-nums">
@@ -73,6 +73,13 @@ function TicketRow({ item, onDec, onInc }) {
 export default function PosDemoPage() {
   const [persisted] = useState(() => readJson(STORAGE_KEY));
   const [persistedPos] = useState(() => readJson(POS_STORAGE_KEY));
+  const [saleType, setSaleType] = useState(() => {
+    const raw = String(persistedPos?.saleType || "").trim();
+    if (raw === "contado") return "contado";
+    if (raw === "credito") return "credito";
+    if (raw === "mayoreo") return "mayoreo";
+    return null;
+  });
   const [categories, setCategories] = useState(() => {
     const base =
       Array.isArray(persisted?.categories) && persisted.categories.length
@@ -87,9 +94,15 @@ export default function PosDemoPage() {
         Number.isFinite(wholesaleCandidate) && wholesaleCandidate >= 0
           ? wholesaleCandidate
           : safeNormalPrice;
+      const creditCandidate = Number(c?.creditPrice ?? safeNormalPrice);
+      const safeCreditPrice =
+        Number.isFinite(creditCandidate) && creditCandidate >= 0
+          ? creditCandidate
+          : safeNormalPrice;
       return {
         ...c,
         price: safeNormalPrice,
+        creditPrice: safeCreditPrice,
         wholesalePrice: safeWholesalePrice,
       };
     });
@@ -109,8 +122,8 @@ export default function PosDemoPage() {
   const [lastPayment, setLastPayment] = useState(null);
 
   useEffect(() => {
-    writeJson(POS_STORAGE_KEY, { ticket });
-  }, [ticket]);
+    writeJson(POS_STORAGE_KEY, { ticket, saleType });
+  }, [ticket, saleType]);
 
   useEffect(() => {
     let alive = true;
@@ -133,9 +146,15 @@ export default function PosDemoPage() {
             Number.isFinite(wholesaleCandidate) && wholesaleCandidate >= 0
               ? wholesaleCandidate
               : safeNormalPrice;
+          const creditCandidate = Number(c?.creditPrice ?? safeNormalPrice);
+          const safeCreditPrice =
+            Number.isFinite(creditCandidate) && creditCandidate >= 0
+              ? creditCandidate
+              : safeNormalPrice;
           return {
             ...c,
             price: safeNormalPrice,
+            creditPrice: safeCreditPrice,
             wholesalePrice: safeWholesalePrice,
           };
         });
@@ -158,7 +177,8 @@ export default function PosDemoPage() {
     () => ticket.reduce((sum, i) => sum + (Number(i.qty) || 0), 0),
     [ticket],
   );
-  const wholesaleApplied = pieces >= WHOLESALE_MIN_QTY;
+  const wholesaleApplied =
+    saleType === "mayoreo" && pieces >= WHOLESALE_MIN_QTY;
 
   const ticketWithPrices = useMemo(() => {
     return ticket.map((i) => {
@@ -172,16 +192,31 @@ export default function PosDemoPage() {
           ? wholesaleCandidate
           : safeNormalPrice;
 
-      const unitPrice = wholesaleApplied ? safeWholesalePrice : safeNormalPrice;
+      const creditCandidate = Number(i.creditPrice ?? safeNormalPrice);
+      const safeCreditPrice =
+        Number.isFinite(creditCandidate) && creditCandidate >= 0
+          ? creditCandidate
+          : safeNormalPrice;
+
+      const unitPrice =
+        saleType === "credito"
+          ? safeCreditPrice
+          : wholesaleApplied
+            ? safeWholesalePrice
+            : safeNormalPrice;
+
+      const pricingTag =
+        saleType === "credito" ? "Crédito" : wholesaleApplied ? "Mayoreo" : "";
 
       return {
         ...i,
         unitPrice,
-        wholesaleApplied,
+        wholesaleApplied: Boolean(wholesaleApplied),
+        pricingTag,
         lineTotal: unitPrice * (Number(i.qty) || 0),
       };
     });
-  }, [ticket]);
+  }, [ticket, saleType, wholesaleApplied]);
 
   const normalTotal = useMemo(() => {
     return ticket.reduce((sum, i) => {
@@ -210,8 +245,9 @@ export default function PosDemoPage() {
 
   const discountApplied = useMemo(() => {
     if (!wholesaleApplied) return 0;
+    if (saleType !== "mayoreo") return 0;
     return Math.max(0, normalTotal - wholesaleTotal);
-  }, [wholesaleApplied, normalTotal, wholesaleTotal]);
+  }, [saleType, wholesaleApplied, normalTotal, wholesaleTotal]);
 
   const total = useMemo(
     () => ticketWithPrices.reduce((sum, i) => sum + i.lineTotal, 0),
@@ -242,6 +278,11 @@ export default function PosDemoPage() {
       Number.isFinite(wholesaleCandidate) && wholesaleCandidate >= 0
         ? wholesaleCandidate
         : safePrice;
+    const creditCandidate = Number(category?.creditPrice ?? safePrice);
+    const safeCreditPrice =
+      Number.isFinite(creditCandidate) && creditCandidate >= 0
+        ? creditCandidate
+        : safePrice;
     const tallaLabel = getProductName(product);
     const categoryName = category?.name || product.categoryId;
     const productLabel = `${categoryName}${tallaLabel ? ` · ${tallaLabel}` : ""}`;
@@ -259,6 +300,7 @@ export default function PosDemoPage() {
             categoryId: product.categoryId,
             categoryName,
             price: safePrice,
+            creditPrice: safeCreditPrice,
             wholesalePrice: safeWholesalePrice,
             qty: 1,
           },
@@ -297,6 +339,7 @@ export default function PosDemoPage() {
 
   function clearTicket() {
     setTicket([]);
+    setSaleType(null);
     showMessage({ type: "ok", text: "Ticket cancelado" });
   }
 
@@ -304,8 +347,16 @@ export default function PosDemoPage() {
     if (!ticket.length) return;
     setLastPayment({ method, total, itemsCount, at: new Date() });
     setTicket([]);
+    setSaleType(null);
     showMessage({ type: "ok", text: `Pago registrado (${method})` });
   }
+
+  const saleTypeLabel = useMemo(() => {
+    if (saleType === "contado") return "Contado";
+    if (saleType === "credito") return "A crédito";
+    if (saleType === "mayoreo") return "Mayoreo";
+    return "";
+  }, [saleType]);
 
   return (
     <div className="space-y-5">
@@ -313,33 +364,39 @@ export default function PosDemoPage() {
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">POS Demo</h1>
           <div className="mt-1 text-sm font-semibold text-slate-600">
-            Escanea un código (ej. 1001 + Enter). El escáner se comporta como
-            teclado.
+            {saleType
+              ? "Escanea un código (ej. 1001 + Enter). El escáner se comporta como teclado."
+              : "Selecciona tipo de pago para empezar."}
           </div>
         </div>
-        <div className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200 print:hidden">
-          Total: <span className="font-extrabold tabular-nums">${total}</span> ·
-          Artículos:{" "}
-          <span className="font-extrabold tabular-nums">{itemsCount}</span>
-          {wholesaleApplied ? (
-            <>
-              {" "}
-              ·{" "}
-              <span className="font-extrabold text-emerald-700">
-                Mayoreo aplicado (-${discountApplied})
-              </span>
-            </>
-          ) : (
-            <>
-              {" "}
-              · Mayoreo desde{" "}
-              <span className="font-extrabold tabular-nums">
-                {WHOLESALE_MIN_QTY}
-              </span>
-              +
-            </>
-          )}
-        </div>
+        {saleType ? (
+          <div className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200 print:hidden">
+            Tipo: <span className="font-extrabold">{saleTypeLabel}</span> ·
+            Total: <span className="font-extrabold tabular-nums">${total}</span>{" "}
+            · Artículos:{" "}
+            <span className="font-extrabold tabular-nums">{itemsCount}</span>
+            {saleType === "mayoreo" ? (
+              wholesaleApplied ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <span className="font-extrabold text-emerald-700">
+                    Mayoreo aplicado (-${discountApplied})
+                  </span>
+                </>
+              ) : (
+                <>
+                  {" "}
+                  · Mayoreo desde{" "}
+                  <span className="font-extrabold tabular-nums">
+                    {WHOLESALE_MIN_QTY}
+                  </span>
+                  +
+                </>
+              )
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {message ? (
@@ -355,91 +412,124 @@ export default function PosDemoPage() {
         </div>
       ) : null}
 
-      <ScannerCapture onScan={addByScan} hideUI />
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <section className="space-y-3">
-          <div className="text-lg font-extrabold tracking-tight">Ticket</div>
-          <div className="space-y-3">
-            {ticketWithPrices.map((item) => (
-              <TicketRow
-                key={item.code}
-                item={item}
-                onDec={() => decItem(item.code)}
-                onInc={() => incItem(item.code)}
-              />
-            ))}
-            {!ticket.length ? (
-              <div className="rounded-2xl bg-white p-5 text-base font-semibold text-slate-600 ring-1 ring-slate-200">
-                Escanea productos para iniciar el ticket.
-              </div>
-            ) : null}
-          </div>
-        </section>
-
-        <section className="space-y-3">
+      {!saleType ? (
+        <div className="rounded-2xl bg-white p-6 ring-1 ring-slate-200">
           <div className="text-lg font-extrabold tracking-tight">
-            Cobro (demo)
+            Tipo de pago
           </div>
-          <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
-            <div className="grid grid-cols-2 gap-3">
-              <BigButton className="w-full" onClick={() => pay("Efectivo")}>
-                Efectivo
-              </BigButton>
-              <BigButton className="w-full" onClick={() => pay("Tarjeta")}>
-                Tarjeta
-              </BigButton>
-              <BigButton
-                className="col-span-2 w-full"
-                variant="danger"
-                onClick={clearTicket}
-              >
-                Cancelar
-              </BigButton>
-            </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <BigButton
+              className="w-full"
+              onClick={() => setSaleType("contado")}
+            >
+              Contado
+            </BigButton>
+            <BigButton
+              className="w-full"
+              onClick={() => setSaleType("credito")}
+            >
+              A crédito
+            </BigButton>
+            <BigButton
+              className="w-full"
+              onClick={() => setSaleType("mayoreo")}
+            >
+              Mayoreo
+            </BigButton>
+          </div>
+        </div>
+      ) : (
+        <ScannerCapture onScan={addByScan} hideUI />
+      )}
 
-            <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-              <div className="text-sm font-extrabold text-slate-700">Total</div>
-              <div className="mt-1 text-3xl font-extrabold tabular-nums">
-                ${total}
-              </div>
-              {wholesaleApplied ? (
-                <div className="mt-2 text-sm font-semibold text-emerald-700">
-                  Descuento mayoreo aplicado: -$
-                  <span className="font-extrabold tabular-nums">
-                    {discountApplied}
-                  </span>
+      {saleType ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <section className="space-y-3">
+            <div className="text-lg font-extrabold tracking-tight">Ticket</div>
+            <div className="space-y-3">
+              {ticketWithPrices.map((item) => (
+                <TicketRow
+                  key={item.code}
+                  item={item}
+                  onDec={() => decItem(item.code)}
+                  onInc={() => incItem(item.code)}
+                />
+              ))}
+              {!ticket.length ? (
+                <div className="rounded-2xl bg-white p-5 text-base font-semibold text-slate-600 ring-1 ring-slate-200">
+                  Escanea productos para iniciar el ticket.
                 </div>
               ) : null}
-              <div className="mt-1 text-sm font-semibold text-slate-600">
-                Items:{" "}
-                <span className="font-extrabold tabular-nums">
-                  {itemsCount}
-                </span>
-              </div>
             </div>
+          </section>
 
-            {lastPayment ? (
-              <div className="mt-4 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-200">
-                <div className="text-sm font-extrabold text-emerald-800">
-                  Último pago
+          <section className="space-y-3">
+            <div className="text-lg font-extrabold tracking-tight">
+              Cobro (demo)
+            </div>
+            <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
+              <div className="grid grid-cols-1 gap-3">
+                <BigButton
+                  className="w-full"
+                  disabled={!ticket.length}
+                  onClick={() => pay(saleTypeLabel)}
+                >
+                  Cobrar
+                </BigButton>
+                <BigButton
+                  className="w-full"
+                  variant="danger"
+                  onClick={clearTicket}
+                >
+                  Cancelar
+                </BigButton>
+              </div>
+
+              <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="text-sm font-extrabold text-slate-700">
+                  Total
                 </div>
-                <div className="mt-1 text-sm font-semibold text-emerald-900">
-                  {lastPayment.method} ·{" "}
+                <div className="mt-1 text-3xl font-extrabold tabular-nums">
+                  ${total}
+                </div>
+                {wholesaleApplied ? (
+                  <div className="mt-2 text-sm font-semibold text-emerald-700">
+                    Descuento mayoreo aplicado: -$
+                    <span className="font-extrabold tabular-nums">
+                      {discountApplied}
+                    </span>
+                  </div>
+                ) : null}
+                <div className="mt-1 text-sm font-semibold text-slate-600">
+                  Items:{" "}
                   <span className="font-extrabold tabular-nums">
-                    ${lastPayment.total}
-                  </span>{" "}
-                  ·{" "}
-                  <span className="font-extrabold tabular-nums">
-                    {lastPayment.itemsCount}
-                  </span>{" "}
-                  items
+                    {itemsCount}
+                  </span>
                 </div>
               </div>
-            ) : null}
-          </div>
-        </section>
-      </div>
+
+              {lastPayment ? (
+                <div className="mt-4 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-200">
+                  <div className="text-sm font-extrabold text-emerald-800">
+                    Último pago
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-emerald-900">
+                    {lastPayment.method} ·{" "}
+                    <span className="font-extrabold tabular-nums">
+                      ${lastPayment.total}
+                    </span>{" "}
+                    ·{" "}
+                    <span className="font-extrabold tabular-nums">
+                      {lastPayment.itemsCount}
+                    </span>{" "}
+                    items
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

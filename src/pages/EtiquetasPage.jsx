@@ -117,8 +117,32 @@ function PrintableLabel({ category, product, codeText }) {
 export default function EtiquetasPage() {
   const [categories, setCategories] = useState(() => {
     const persisted = readJson(STORAGE_KEY);
-    if (Array.isArray(persisted?.categories) && persisted.categories.length)
-      return persisted.categories;
+    if (Array.isArray(persisted?.categories) && persisted.categories.length) {
+      return persisted.categories.map((c) => {
+        const normalPrice = Number(c?.price ?? 0);
+        const safeNormalPrice =
+          Number.isFinite(normalPrice) && normalPrice >= 0 ? normalPrice : 0;
+
+        const wholesaleCandidate = Number(c?.wholesalePrice ?? safeNormalPrice);
+        const safeWholesalePrice =
+          Number.isFinite(wholesaleCandidate) && wholesaleCandidate >= 0
+            ? wholesaleCandidate
+            : safeNormalPrice;
+
+        const creditCandidate = Number(c?.creditPrice ?? safeNormalPrice);
+        const safeCreditPrice =
+          Number.isFinite(creditCandidate) && creditCandidate >= 0
+            ? creditCandidate
+            : safeNormalPrice;
+
+        return {
+          ...c,
+          price: safeNormalPrice,
+          creditPrice: safeCreditPrice,
+          wholesalePrice: safeWholesalePrice,
+        };
+      });
+    }
     return [];
   });
   const [products, setProducts] = useState(() => {
@@ -144,7 +168,33 @@ export default function EtiquetasPage() {
         const catRes = await apiGet("/api/catalog/categories");
         const prodRes = await apiGet("/api/catalog/products");
         if (!alive) return;
-        setCategories(catRes?.categories || []);
+        const nextCategories = (catRes?.categories || []).map((c) => {
+          const normalPrice = Number(c?.price ?? 0);
+          const safeNormalPrice =
+            Number.isFinite(normalPrice) && normalPrice >= 0 ? normalPrice : 0;
+
+          const wholesaleCandidate = Number(
+            c?.wholesalePrice ?? safeNormalPrice,
+          );
+          const safeWholesalePrice =
+            Number.isFinite(wholesaleCandidate) && wholesaleCandidate >= 0
+              ? wholesaleCandidate
+              : safeNormalPrice;
+
+          const creditCandidate = Number(c?.creditPrice ?? safeNormalPrice);
+          const safeCreditPrice =
+            Number.isFinite(creditCandidate) && creditCandidate >= 0
+              ? creditCandidate
+              : safeNormalPrice;
+
+          return {
+            ...c,
+            price: safeNormalPrice,
+            creditPrice: safeCreditPrice,
+            wholesalePrice: safeWholesalePrice,
+          };
+        });
+        setCategories(nextCategories);
         setProducts(prodRes?.products || []);
       } catch {
         if (!alive) return;
@@ -356,7 +406,7 @@ export default function EtiquetasPage() {
               onChange={(e) => setCategoryId(e.target.value)}
               options={categories.map((c) => ({
                 value: c.id,
-                label: `${c.name} ($${c.price} / $${c.wholesalePrice ?? c.price})`,
+                label: `${c.name} ($${c.price} / $${c.creditPrice ?? c.price} / $${c.wholesalePrice ?? c.price})`,
               }))}
             />
             <SelectField
@@ -418,7 +468,7 @@ export default function EtiquetasPage() {
                 { value: "", label: "Todas" },
                 ...categories.map((c) => ({
                   value: c.id,
-                  label: `${c.name} ($${c.price} / $${c.wholesalePrice ?? c.price})`,
+                  label: `${c.name} ($${c.price} / $${c.creditPrice ?? c.price} / $${c.wholesalePrice ?? c.price})`,
                 })),
               ]}
               className="sm:col-span-2"

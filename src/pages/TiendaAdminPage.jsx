@@ -497,10 +497,16 @@ export default function TiendaAdminPage() {
         Number.isFinite(wholesaleCandidate) && wholesaleCandidate >= 0
           ? wholesaleCandidate
           : safeNormalPrice;
+      const creditCandidate = Number(c?.creditPrice ?? safeNormalPrice);
+      const safeCreditPrice =
+        Number.isFinite(creditCandidate) && creditCandidate >= 0
+          ? creditCandidate
+          : safeNormalPrice;
       return {
         id: c.id,
         name: c.name,
         price: safeNormalPrice,
+        creditPrice: safeCreditPrice,
         wholesalePrice: safeWholesalePrice,
         sizeProfileId: profileId,
         tallas: c.tallas,
@@ -613,12 +619,18 @@ export default function TiendaAdminPage() {
             Number.isFinite(wholesaleCandidate) && wholesaleCandidate >= 0
               ? wholesaleCandidate
               : safeNormalPrice;
+          const creditCandidate = Number(c?.creditPrice ?? safeNormalPrice);
+          const safeCreditPrice =
+            Number.isFinite(creditCandidate) && creditCandidate >= 0
+              ? creditCandidate
+              : safeNormalPrice;
           const profileId =
             String(c?.sizeProfileId || "").trim() || defaultProfileId;
           return {
             id: c.id,
             name: c.name,
             price: safeNormalPrice,
+            creditPrice: safeCreditPrice,
             wholesalePrice: safeWholesalePrice,
             sizeProfileId: profileId,
           };
@@ -650,6 +662,7 @@ export default function TiendaAdminPage() {
 
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryPrice, setNewCategoryPrice] = useState("");
+  const [newCategoryCreditPrice, setNewCategoryCreditPrice] = useState("");
   const [newCategoryWholesalePrice, setNewCategoryWholesalePrice] =
     useState("");
   const [newCategorySizeProfile, setNewCategorySizeProfile] = useState("");
@@ -684,6 +697,7 @@ export default function TiendaAdminPage() {
   const [editingCategoryId, setEditingCategoryId] = useState(null);
   const [editCategoryName, setEditCategoryName] = useState("");
   const [editCategoryPrice, setEditCategoryPrice] = useState("");
+  const [editCategoryCreditPrice, setEditCategoryCreditPrice] = useState("");
   const [editCategoryWholesalePrice, setEditCategoryWholesalePrice] =
     useState("");
   const [editCategoryProfileId, setEditCategoryProfileId] = useState("");
@@ -937,6 +951,11 @@ export default function TiendaAdminPage() {
         Number.isFinite(wholesaleCandidate) && wholesaleCandidate >= 0
           ? wholesaleCandidate
           : safeNormalPrice;
+      const creditCandidate = Number(c?.creditPrice ?? safeNormalPrice);
+      const safeCreditPrice =
+        Number.isFinite(creditCandidate) && creditCandidate >= 0
+          ? creditCandidate
+          : safeNormalPrice;
       const profileId =
         String(c?.sizeProfileId || "").trim() ||
         String(fallbackProfileId || "");
@@ -944,6 +963,7 @@ export default function TiendaAdminPage() {
         id: c.id,
         name: c.name,
         price: safeNormalPrice,
+        creditPrice: safeCreditPrice,
         wholesalePrice: safeWholesalePrice,
         sizeProfileId: profileId,
       };
@@ -1073,17 +1093,21 @@ export default function TiendaAdminPage() {
     const baseId = toCategoryId(name);
     const id = nextAvailableCategoryId(baseId, categories);
     const price = Number(newCategoryPrice || 0);
+    const creditPrice = Number(newCategoryCreditPrice || price || 0);
     const wholesalePrice = Number(newCategoryWholesalePrice || 0);
     const profile =
       sizeProfiles.find((p) => p.id === newCategorySizeProfile) || null;
 
     if (!baseId || !name) return;
     if (!Number.isFinite(price) || price < 0) return;
+    if (!Number.isFinite(creditPrice) || creditPrice < 0) return;
     if (!profile) {
       window.alert("Selecciona un perfil de tallas");
       return;
     }
 
+    const safeCreditPrice =
+      Number.isFinite(creditPrice) && creditPrice >= 0 ? creditPrice : price;
     const safeWholesalePrice =
       Number.isFinite(wholesalePrice) && wholesalePrice >= 0
         ? wholesalePrice
@@ -1093,6 +1117,7 @@ export default function TiendaAdminPage() {
       id,
       name,
       price,
+      creditPrice: safeCreditPrice,
       wholesalePrice: safeWholesalePrice,
       sizeProfileId: profile.id,
     };
@@ -1115,6 +1140,7 @@ export default function TiendaAdminPage() {
     }
     setNewCategoryName("");
     setNewCategoryPrice("");
+    setNewCategoryCreditPrice("");
     setNewCategoryWholesalePrice("");
     setNewCategorySizeProfile("");
     setNewProductCategoryId(id);
@@ -1285,6 +1311,9 @@ export default function TiendaAdminPage() {
     setEditingCategoryId(category.id);
     setEditCategoryName(category.name);
     setEditCategoryPrice(String(category.price ?? 0));
+    setEditCategoryCreditPrice(
+      String(category.creditPrice ?? category.price ?? 0),
+    );
     setEditCategoryWholesalePrice(
       String(category.wholesalePrice ?? category.price ?? 0),
     );
@@ -1300,6 +1329,7 @@ export default function TiendaAdminPage() {
   async function saveEditCategory() {
     const name = String(editCategoryName || "").trim();
     const price = Number(editCategoryPrice || 0);
+    const creditPrice = Number(editCategoryCreditPrice || price || 0);
     const wholesalePrice = Number(editCategoryWholesalePrice || 0);
     const locked = Boolean(categoryHasStock?.[editingCategoryId]);
     const lockedProfileId = locked
@@ -1312,11 +1342,14 @@ export default function TiendaAdminPage() {
     if (!editingCategoryId) return;
     if (!name) return;
     if (!Number.isFinite(price) || price < 0) return;
+    if (!Number.isFinite(creditPrice) || creditPrice < 0) return;
     if (!profile) {
       window.alert("Selecciona un perfil de tallas");
       return;
     }
 
+    const safeCreditPrice =
+      Number.isFinite(creditPrice) && creditPrice >= 0 ? creditPrice : price;
     const safeWholesalePrice =
       Number.isFinite(wholesalePrice) && wholesalePrice >= 0
         ? wholesalePrice
@@ -1325,6 +1358,7 @@ export default function TiendaAdminPage() {
     const nextPatch = {
       name,
       price,
+      creditPrice: safeCreditPrice,
       wholesalePrice: safeWholesalePrice,
       sizeProfileId: profile.id,
     };
@@ -1349,6 +1383,7 @@ export default function TiendaAdminPage() {
             ...c,
             name,
             price,
+            creditPrice: safeCreditPrice,
             wholesalePrice: safeWholesalePrice,
             sizeProfileId: profile.id,
             tallas: c.tallas,
@@ -1722,8 +1757,12 @@ export default function TiendaAdminPage() {
       );
     }
 
-    setNewProductTalla((prev) => (String(prev || "").trim() === from ? to : prev));
-    setEditProductTalla((prev) => (String(prev || "").trim() === from ? to : prev));
+    setNewProductTalla((prev) =>
+      String(prev || "").trim() === from ? to : prev,
+    );
+    setEditProductTalla((prev) =>
+      String(prev || "").trim() === from ? to : prev,
+    );
 
     if (dataSource === "api") {
       try {
@@ -1740,7 +1779,9 @@ export default function TiendaAdminPage() {
     } else {
       if (Array.isArray(nextValues)) {
         setSizeProfiles((prev) =>
-          prev.map((p) => (p.id === profileId ? { ...p, values: nextValues } : p)),
+          prev.map((p) =>
+            p.id === profileId ? { ...p, values: nextValues } : p,
+          ),
         );
       }
     }
@@ -1966,6 +2007,15 @@ export default function TiendaAdminPage() {
                       inputMode="numeric"
                     />
                     <Field
+                      label="Precio a crédito"
+                      value={newCategoryCreditPrice}
+                      onChange={(e) =>
+                        setNewCategoryCreditPrice(e.target.value)
+                      }
+                      placeholder="Ej. 480"
+                      inputMode="numeric"
+                    />
+                    <Field
                       label="Precio mayoreo"
                       value={newCategoryWholesalePrice}
                       onChange={(e) =>
@@ -2003,7 +2053,7 @@ export default function TiendaAdminPage() {
 
             <Panel
               title="Categorías"
-              subtitle="Edita nombre, precio normal, precio mayoreo y perfil de tallas."
+              subtitle="Edita nombre, precio normal, precio a crédito, precio mayoreo y perfil de tallas."
               className="bg-indigo-50 ring-indigo-200"
             >
               <div className="space-y-3">
@@ -2034,7 +2084,8 @@ export default function TiendaAdminPage() {
                                 {c.name}
                               </div>
                               <div className="mt-1 text-sm font-semibold text-slate-600">
-                                ${c.price} / ${c.wholesalePrice ?? c.price} ·{" "}
+                                ${c.price} / ${c.creditPrice ?? c.price} / $
+                                {c.wholesalePrice ?? c.price} ·{" "}
                                 {summarizeTallasByProfile(c, sizeProfiles)}
                               </div>
                             </div>
@@ -2089,6 +2140,15 @@ export default function TiendaAdminPage() {
                             }
                             inputMode="numeric"
                             placeholder="Ej. 150"
+                          />
+                          <Field
+                            label="Precio a crédito"
+                            value={editCategoryCreditPrice}
+                            onChange={(e) =>
+                              setEditCategoryCreditPrice(e.target.value)
+                            }
+                            inputMode="numeric"
+                            placeholder="Ej. 180"
                           />
                           <Field
                             label="Precio mayoreo"
@@ -2408,7 +2468,7 @@ export default function TiendaAdminPage() {
                       { value: "", label: "Selecciona…" },
                       ...categories.map((c) => ({
                         value: c.id,
-                        label: `${c.name} ($${c.price} / $${c.wholesalePrice ?? c.price})`,
+                        label: `${c.name} ($${c.price} / $${c.creditPrice ?? c.price} / $${c.wholesalePrice ?? c.price})`,
                       })),
                     ]}
                   />
@@ -2603,7 +2663,7 @@ export default function TiendaAdminPage() {
                                     { value: "", label: "Selecciona…" },
                                     ...categories.map((c) => ({
                                       value: c.id,
-                                      label: `${c.name} ($${c.price} / $${c.wholesalePrice ?? c.price})`,
+                                      label: `${c.name} ($${c.price} / $${c.creditPrice ?? c.price} / $${c.wholesalePrice ?? c.price})`,
                                     })),
                                   ]}
                                 />
