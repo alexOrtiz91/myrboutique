@@ -41,20 +41,20 @@ async function query(text, params) {
   return pool.query(text, params);
 }
 
-let hasSizeProfilesValueTypeColumn = null;
-async function getHasSizeProfilesValueTypeColumn() {
-  if (hasSizeProfilesValueTypeColumn === true) return true;
-  const r = await query(
+async function getNextNumericProductCode(run) {
+  const r = await run(
     `
-      SELECT 1 AS ok
-      FROM information_schema.columns
-      WHERE table_name = 'size_profiles'
-        AND column_name = 'value_type'
-      LIMIT 1
+      SELECT
+        (
+          COALESCE(
+            MAX(CASE WHEN code ~ '^[0-9]+$' THEN code::BIGINT END),
+            999
+          ) + 1
+        ) AS next
+      FROM product_variants
     `,
   );
-  hasSizeProfilesValueTypeColumn = Boolean(r.rows?.length);
-  return hasSizeProfilesValueTypeColumn;
+  return String(r.rows?.[0]?.next || "").trim();
 }
 
 function toBranchCode(value) {
@@ -232,10 +232,9 @@ app.post("/api/branches", async (req, res) => {
 
 app.get("/api/size-profiles", async (_req, res) => {
   try {
-    const hasValueType = await getHasSizeProfilesValueTypeColumn();
     const profilesRes = await query(
       `
-        SELECT id, label, genero${hasValueType ? ", value_type" : ""}
+        SELECT id, label, genero
         FROM size_profiles
         WHERE active = TRUE
         ORDER BY label ASC, created_at ASC
@@ -266,8 +265,6 @@ app.get("/api/size-profiles", async (_req, res) => {
         id: r.id,
         label: r.label,
         genero: r.genero || "",
-        valueType:
-          String(r.value_type || "").trim() === "numeric" ? "numeric" : "text",
         values: valuesByProfileId[String(r.id)] || [],
       })),
     });
@@ -280,13 +277,10 @@ app.post("/api/size-profiles", async (req, res) => {
   const client = pool ? await pool.connect() : null;
   try {
     if (!client) throw new Error("DATABASE_URL is not set");
-    const hasValueTypeColumn = await getHasSizeProfilesValueTypeColumn();
 
     const id = String(req.body?.id || "").trim();
     const label = String(req.body?.label || "").trim();
     const genero = String(req.body?.genero || "").trim();
-    const valueTypeRaw = String(req.body?.valueType || "").trim();
-    const valueType = valueTypeRaw === "numeric" ? "numeric" : "text";
     const values = Array.isArray(req.body?.values)
       ? req.body.values.map((v) => String(v || "").trim()).filter(Boolean)
       : [];
@@ -294,23 +288,13 @@ app.post("/api/size-profiles", async (req, res) => {
       return res.status(400).json({ error: "invalid_payload" });
 
     await client.query("BEGIN");
-    if (hasValueTypeColumn) {
-      await client.query(
-        `
-          INSERT INTO size_profiles (id, label, genero, value_type, active)
-          VALUES ($1, $2, $3, $4, TRUE)
-        `,
-        [id, label, genero || null, valueType],
-      );
-    } else {
-      await client.query(
-        `
-          INSERT INTO size_profiles (id, label, genero, active)
-          VALUES ($1, $2, $3, TRUE)
-        `,
-        [id, label, genero || null],
-      );
-    }
+    await client.query(
+      `
+        INSERT INTO size_profiles (id, label, genero, active)
+        VALUES ($1, $2, $3, TRUE)
+      `,
+      [id, label, genero || null],
+    );
     for (let i = 0; i < values.length; i += 1) {
       await client.query(
         `
@@ -324,7 +308,7 @@ app.post("/api/size-profiles", async (req, res) => {
     await client.query("COMMIT");
 
     res.json({
-      profile: { id, label, genero: genero || "", valueType, values },
+      profile: { id, label, genero: genero || "", values },
     });
   } catch (e) {
     try {
@@ -344,28 +328,14 @@ app.patch("/api/size-profiles/:id", async (req, res) => {
     if (!client) throw new Error("DATABASE_URL is not set");
     const id = String(req.params?.id || "").trim();
     if (!id) return res.status(400).json({ error: "invalid_id" });
-    const hasValueTypeColumn = await getHasSizeProfilesValueTypeColumn();
 
     const body = req.body || {};
     const hasLabel = Object.prototype.hasOwnProperty.call(body, "label");
     const hasGenero = Object.prototype.hasOwnProperty.call(body, "genero");
     const hasValues = Object.prototype.hasOwnProperty.call(body, "values");
-    const hasValueType = Object.prototype.hasOwnProperty.call(
-      body,
-      "valueType",
-    );
 
     const label = hasLabel ? String(body.label ?? "").trim() : null;
     const genero = hasGenero ? String(body.genero ?? "").trim() : null;
-    const valueTypeRaw = hasValueType
-      ? String(body.valueType ?? "").trim()
-      : null;
-    const valueType =
-      valueTypeRaw === null
-        ? null
-        : valueTypeRaw === "numeric"
-          ? "numeric"
-          : "text";
     const valuesRaw = hasValues ? body.values : null;
     const values = Array.isArray(valuesRaw)
       ? valuesRaw.map((v) => String(v || "").trim()).filter(Boolean)
@@ -381,29 +351,16 @@ app.patch("/api/size-profiles/:id", async (req, res) => {
       return res.status(404).json({ error: "not_found" });
     }
 
-    if (label !== null || genero !== null || valueType !== null) {
-      if (hasValueTypeColumn) {
-        await client.query(
-          `
-            UPDATE size_profiles
-            SET label = COALESCE($2, label),
-                genero = COALESCE($3, genero),
-                value_type = COALESCE($4, value_type)
-            WHERE id = $1
-          `,
-          [id, label, genero === "" ? null : genero, valueType],
-        );
-      } else {
-        await client.query(
-          `
-            UPDATE size_profiles
-            SET label = COALESCE($2, label),
-                genero = COALESCE($3, genero)
-            WHERE id = $1
-          `,
-          [id, label, genero === "" ? null : genero],
-        );
-      }
+    if (label !== null || genero !== null) {
+      await client.query(
+        `
+          UPDATE size_profiles
+          SET label = COALESCE($2, label),
+              genero = COALESCE($3, genero)
+          WHERE id = $1
+        `,
+        [id, label, genero === "" ? null : genero],
+      );
     }
 
     if (values !== null) {
@@ -425,7 +382,7 @@ app.patch("/api/size-profiles/:id", async (req, res) => {
     }
 
     const profileRes = await client.query(
-      `SELECT id, label, genero${hasValueTypeColumn ? ", value_type" : ""} FROM size_profiles WHERE id = $1`,
+      `SELECT id, label, genero FROM size_profiles WHERE id = $1`,
       [id],
     );
     const valuesRes = await client.query(
@@ -445,8 +402,6 @@ app.patch("/api/size-profiles/:id", async (req, res) => {
         id: r.id,
         label: r.label,
         genero: r.genero || "",
-        valueType:
-          String(r.value_type || "").trim() === "numeric" ? "numeric" : "text",
         values: valuesRes.rows.map((v) => String(v.value)),
       },
     });
@@ -639,15 +594,15 @@ app.get("/api/catalog/products", async (_req, res) => {
   try {
     const { rows } = await query(
       `
-        SELECT barcode, category_id, talla
+        SELECT code, category_id, talla
         FROM product_variants
         WHERE active = TRUE
-        ORDER BY barcode ASC
+        ORDER BY code ASC
       `,
     );
     res.json({
       products: rows.map((r) => ({
-        code: r.barcode,
+        code: r.code,
         categoryId: r.category_id,
         talla: r.talla,
       })),
@@ -662,7 +617,7 @@ app.post("/api/catalog/products", async (req, res) => {
     const code = String(req.body?.code || "").trim();
     const categoryId = String(req.body?.categoryId || "").trim();
     const talla = String(req.body?.talla || "").trim();
-    if (!code || !categoryId || !talla)
+    if (!categoryId || !talla)
       return res.status(400).json({ error: "invalid_payload" });
 
     const dup = await query(
@@ -679,18 +634,33 @@ app.post("/api/catalog/products", async (req, res) => {
     if (dup.rows?.length)
       return res.status(409).json({ error: "duplicate_variant" });
 
-    const { rows } = await query(
-      `
-        INSERT INTO product_variants (barcode, category_id, talla, active)
-        VALUES ($1, $2, $3, TRUE)
-        RETURNING barcode, category_id, talla
-      `,
-      [code, categoryId, talla],
-    );
+    let candidate = code || (await getNextNumericProductCode(query));
+    let rows = null;
+    for (let i = 0; i < 20; i += 1) {
+      try {
+        const inserted = await query(
+          `
+            INSERT INTO product_variants (code, category_id, talla, active)
+            VALUES ($1, $2, $3, TRUE)
+            RETURNING code, category_id, talla
+          `,
+          [candidate, categoryId, talla],
+        );
+        rows = inserted.rows;
+        break;
+      } catch (e) {
+        const isUnique = String(e?.code || "") === "23505";
+        const isBarcodeConstraint =
+          String(e?.constraint || "") === "product_variants_code_key";
+        if (!isUnique || !isBarcodeConstraint) throw e;
+        candidate = await getNextNumericProductCode(query);
+      }
+    }
+    if (!rows?.length) throw new Error("code_generation_failed");
 
     const r = rows[0];
     res.json({
-      product: { code: r.barcode, categoryId: r.category_id, talla: r.talla },
+      product: { code: r.code, categoryId: r.category_id, talla: r.talla },
     });
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
@@ -718,7 +688,7 @@ app.patch("/api/catalog/products/:code", async (req, res) => {
       `
         SELECT id, category_id, talla
         FROM product_variants
-        WHERE barcode = $1 AND active = TRUE
+        WHERE code = $1 AND active = TRUE
         LIMIT 1
       `,
       [code],
@@ -753,7 +723,7 @@ app.patch("/api/catalog/products/:code", async (req, res) => {
         WHERE active = TRUE
           AND category_id = $1
           AND talla = $2
-          AND barcode <> $3
+          AND code <> $3
         LIMIT 1
       `,
       [categoryId, talla, code],
@@ -768,8 +738,8 @@ app.patch("/api/catalog/products/:code", async (req, res) => {
         UPDATE product_variants
         SET category_id = $2,
             talla = $3
-        WHERE barcode = $1 AND active = TRUE
-        RETURNING barcode, category_id, talla
+        WHERE code = $1 AND active = TRUE
+        RETURNING code, category_id, talla
       `,
       [code, categoryId, talla],
     );
@@ -777,7 +747,7 @@ app.patch("/api/catalog/products/:code", async (req, res) => {
     await client.query("COMMIT");
     const r = updated.rows[0];
     res.json({
-      product: { code: r.barcode, categoryId: r.category_id, talla: r.talla },
+      product: { code: r.code, categoryId: r.category_id, talla: r.talla },
     });
   } catch (e) {
     try {
@@ -803,7 +773,7 @@ app.delete("/api/catalog/products/:code", async (req, res) => {
 
     await client.query("BEGIN");
     const pvRes = await client.query(
-      `SELECT id FROM product_variants WHERE barcode = $1 AND active = TRUE LIMIT 1`,
+      `SELECT id FROM product_variants WHERE code = $1 AND active = TRUE LIMIT 1`,
       [code],
     );
     const productVariantId = pvRes.rows[0]?.id || null;
@@ -849,7 +819,7 @@ app.get("/api/inventory/stock", async (req, res) => {
 
     const { rows } = await client.query(
       `
-        SELECT pv.barcode AS code, ic.qty
+        SELECT pv.code AS code, ic.qty
         FROM product_variants pv
         LEFT JOIN inventory_counts ic
           ON ic.product_variant_id = pv.id
@@ -886,7 +856,7 @@ app.post("/api/inventory/adjust", async (req, res) => {
 
     await client.query("BEGIN");
     const pv = await client.query(
-      `SELECT id FROM product_variants WHERE barcode = $1 AND active = TRUE`,
+      `SELECT id FROM product_variants WHERE code = $1 AND active = TRUE`,
       [code],
     );
     const productVariantId = pv.rows[0]?.id;

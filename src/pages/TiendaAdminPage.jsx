@@ -70,11 +70,6 @@ function getProfileTallas(profile) {
   return Array.isArray(profile.values) ? profile.values : [];
 }
 
-function getProfileValueType(profile) {
-  const t = String(profile?.valueType || "").trim();
-  return t === "numeric" ? "numeric" : "text";
-}
-
 function isNumericSizeValue(value) {
   const s = String(value || "").trim();
   if (!s) return false;
@@ -586,7 +581,6 @@ export default function TiendaAdminPage() {
 
   const [newSizeProfileLabel, setNewSizeProfileLabel] = useState("");
   const [newSizeProfileGenero, setNewSizeProfileGenero] = useState("");
-  const [newSizeProfileValueType, setNewSizeProfileValueType] = useState("");
   const [profileValueDraft, setProfileValueDraft] = useState({});
 
   const [isCreateCategoryOpen, setIsCreateCategoryOpen] = useState(false);
@@ -1481,22 +1475,13 @@ export default function TiendaAdminPage() {
       window.alert("Selecciona un género");
       return;
     }
-    if (
-      newSizeProfileValueType !== "numeric" &&
-      newSizeProfileValueType !== "text"
-    ) {
-      window.alert("Selecciona el tipo de talla");
-      return;
-    }
     const genero = newSizeProfileGenero;
-    const valueType = newSizeProfileValueType;
     if (dataSource === "api") {
       try {
         const r = await apiSend("/api/size-profiles", "POST", {
           id,
           label,
           genero,
-          valueType,
           values: [],
         });
         void r;
@@ -1506,14 +1491,10 @@ export default function TiendaAdminPage() {
         return;
       }
     } else {
-      setSizeProfiles((prev) => [
-        ...prev,
-        { id, label, genero, valueType, values: [] },
-      ]);
+      setSizeProfiles((prev) => [...prev, { id, label, genero, values: [] }]);
     }
     setNewSizeProfileLabel("");
     setNewSizeProfileGenero("");
-    setNewSizeProfileValueType("");
   }
 
   function setSizeProfileLabel(profileId, nextLabel) {
@@ -1530,14 +1511,6 @@ export default function TiendaAdminPage() {
     );
   }
 
-  function setSizeProfileValueType(profileId, nextType) {
-    const t =
-      nextType === "numeric" ? "numeric" : nextType === "text" ? "text" : "";
-    setSizeProfiles((prev) =>
-      prev.map((p) => (p.id === profileId ? { ...p, valueType: t } : p)),
-    );
-  }
-
   async function saveSizeProfile(profileId) {
     if (dataSource !== "api") return;
     const profile = sizeProfiles.find((p) => p.id === profileId) || null;
@@ -1549,7 +1522,6 @@ export default function TiendaAdminPage() {
         {
           label: profile.label,
           genero: profile.genero,
-          valueType: getProfileValueType(profile),
           values: getProfileTallas(profile),
         },
       );
@@ -1563,12 +1535,6 @@ export default function TiendaAdminPage() {
     const raw = profileValueDraft?.[profileId];
     const value = String(raw || "").trim();
     if (!value) return;
-    const profile = sizeProfiles.find((p) => p.id === profileId) || null;
-    const valueType = getProfileValueType(profile);
-    if (valueType === "numeric" && !isNumericSizeValue(value)) {
-      window.alert("Esta talla debe ser numérica (ej. 28, 22.5, 00)");
-      return;
-    }
     let nextValues = null;
     setSizeProfiles((prev) =>
       prev.map((p) => {
@@ -2062,7 +2028,7 @@ export default function TiendaAdminPage() {
                     Crear perfil
                   </BigButton>
                 ) : (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-5 sm:items-end">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 sm:items-end">
                     <div className="sm:col-span-2">
                       <Field
                         label="Nuevo perfil"
@@ -2078,18 +2044,6 @@ export default function TiendaAdminPage() {
                       options={[
                         { value: "", label: "Selecciona…" },
                         ...fixedGeneros.map((g) => ({ value: g, label: g })),
-                      ]}
-                    />
-                    <SelectField
-                      label="Tipo de talla"
-                      value={newSizeProfileValueType}
-                      onChange={(e) =>
-                        setNewSizeProfileValueType(e.target.value)
-                      }
-                      options={[
-                        { value: "", label: "Selecciona…" },
-                        { value: "text", label: "Texto (XS, M, XL)" },
-                        { value: "numeric", label: "Numérico (00, 25.5)" },
                       ]}
                     />
                     <div className="sm:col-span-1">
@@ -2112,7 +2066,6 @@ export default function TiendaAdminPage() {
                   const preview = `${getProfileTallas(p).slice(0, 10).join(", ")}${
                     getProfileTallas(p).length > 10 ? "…" : ""
                   }`;
-                  const valueType = getProfileValueType(p);
                   const isSelected = selectedProfileId === p.id;
                   const isEditing = editingProfileId === p.id;
 
@@ -2188,7 +2141,7 @@ export default function TiendaAdminPage() {
                           <div className="flex justify-end">
                             <XButton onClick={closeAllCatalogForms} />
                           </div>
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end">
                             <Field
                               label="Nombre"
                               value={p.label}
@@ -2209,21 +2162,6 @@ export default function TiendaAdminPage() {
                                   value: g,
                                   label: g,
                                 })),
-                              ]}
-                            />
-                            <SelectField
-                              label="Tipo de talla"
-                              value={p.valueType || ""}
-                              onChange={(e) =>
-                                setSizeProfileValueType(p.id, e.target.value)
-                              }
-                              options={[
-                                { value: "", label: "Selecciona…" },
-                                { value: "text", label: "Texto (XS, M, XL)" },
-                                {
-                                  value: "numeric",
-                                  label: "Numérico (00, 25.5)",
-                                },
                               ]}
                             />
                           </div>
@@ -2268,14 +2206,8 @@ export default function TiendaAdminPage() {
                                     [p.id]: e.target.value,
                                   }))
                                 }
-                                placeholder={
-                                  valueType === "numeric"
-                                    ? "Ej. 25.5 o 00"
-                                    : "Ej. XS"
-                                }
-                                inputMode={
-                                  valueType === "numeric" ? "decimal" : "text"
-                                }
+                                placeholder="Ej. XS o 25.5"
+                                inputMode="text"
                               />
                             </div>
                             <div className="sm:col-span-1">
@@ -2449,7 +2381,7 @@ export default function TiendaAdminPage() {
                   <div className="col-span-1 text-right">Stock</div>
                 </div>
                 <div className="divide-y divide-slate-200 bg-white">
-                  {productsWithDetails.map((p) => {
+                  {productsForInventory.map((p) => {
                     const isSelected = selectedProductCode === p.code;
                     const isEditing = editingProductCode === p.code;
                     const hasStock = Boolean(productHasStock?.[p.code]);

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import BarcodeCanvas from "../components/BarcodeCanvas.jsx";
 import BigButton from "../components/BigButton.jsx";
 import QrImage from "../components/QrImage.jsx";
 import Field from "../components/Field.jsx";
@@ -60,7 +59,7 @@ function parseBulkQtyConfig(raw) {
   return { allQty: null, tallaQtyMap: parseTallaQtyMap(trimmed) };
 }
 
-function LabelPreview({ category, product, codeType, codeText }) {
+function LabelPreview({ category, product, codeText }) {
   return (
     <div className="w-full rounded-2xl bg-white p-4 ring-1 ring-slate-200">
       <div className="flex items-start justify-between gap-3">
@@ -74,20 +73,14 @@ function LabelPreview({ category, product, codeType, codeText }) {
           </div>
         </div>
         <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-extrabold uppercase tracking-wide text-slate-600 ring-1 ring-slate-200">
-          {codeType === "qr" ? "QR" : "BARCODE"}
+          QR
         </div>
       </div>
 
       <div className="mt-3 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
-        {codeType === "qr" ? (
-          <div className="mx-auto w-36">
-            <QrImage text={codeText} />
-          </div>
-        ) : (
-          <div className="mx-auto w-full max-w-[280px]">
-            <BarcodeCanvas text={codeText} />
-          </div>
-        )}
+        <div className="mx-auto w-36">
+          <QrImage text={codeText} />
+        </div>
       </div>
 
       <div className="mt-2 text-center text-xs font-semibold text-slate-500">
@@ -97,7 +90,7 @@ function LabelPreview({ category, product, codeType, codeText }) {
   );
 }
 
-function PrintableLabel({ category, product, codeType, codeText }) {
+function PrintableLabel({ category, product, codeText }) {
   return (
     <div className="rounded-xl border border-slate-300 bg-white p-3 print:flex print:h-full print:w-full print:flex-col print:items-center print:justify-center print:gap-[0.1mm] print:overflow-hidden print:rounded-none print:border-0 print:bg-transparent print:p-0 print:text-center">
       <div className="text-sm font-extrabold tracking-tight print:text-[4px] print:leading-tight">
@@ -110,15 +103,9 @@ function PrintableLabel({ category, product, codeType, codeText }) {
         ${category?.price ?? 0}
       </div>
       <div className="mt-2 print:mt-0">
-        {codeType === "qr" ? (
-          <div className="mx-auto w-28 print:w-[10mm]">
-            <QrImage text={codeText} />
-          </div>
-        ) : (
-          <div className="mx-auto w-full max-w-[240px] print:max-w-none">
-            <BarcodeCanvas text={codeText} />
-          </div>
-        )}
+        <div className="mx-auto w-28 print:w-[10mm]">
+          <QrImage text={codeText} />
+        </div>
       </div>
       <div className="mt-2 text-center text-[10px] font-semibold text-slate-700 print:mt-0 print:text-[3.6px] print:leading-tight">
         {product?.talla ? `${codeText} · ${product.talla}` : codeText}
@@ -144,7 +131,6 @@ export default function EtiquetasPage() {
   const [selectedProductCode, setSelectedProductCode] = useState(
     products[0]?.code || "",
   );
-  const [codeType, setCodeType] = useState("qr");
   const [sheetCount, setSheetCount] = useState(String(SHEET_PAGE_SIZE));
   const [sheet, setSheet] = useState([]);
   const [bulkCategoryId, setBulkCategoryId] = useState("");
@@ -243,7 +229,6 @@ export default function EtiquetasPage() {
           id: `${Date.now()}-${Math.random()}-${i}`,
           categoryId: category.id,
           productCode: product.code,
-          codeType,
           codeText: ct,
         });
       }
@@ -320,7 +305,6 @@ export default function EtiquetasPage() {
             id: `${Date.now()}-${Math.random()}-${seq}`,
             categoryId: p.categoryId,
             productCode: p.code,
-            codeType,
             codeText: ct,
           });
           seq += 1;
@@ -362,7 +346,7 @@ export default function EtiquetasPage() {
             Generar etiqueta
           </div>
           <div className="mt-1 text-sm font-semibold text-slate-600">
-            Selecciona categoría, producto y tipo de código.
+            Selecciona categoría y producto.
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -384,15 +368,6 @@ export default function EtiquetasPage() {
                 label: `${p.code} · ${getProductName(p) || "—"}`,
               }))}
               className="sm:col-span-2"
-            />
-            <SelectField
-              label="Tipo de código"
-              value={codeType}
-              onChange={(e) => setCodeType(e.target.value)}
-              options={[
-                { value: "barcode", label: "Código de barras (Code128)" },
-                { value: "qr", label: "QR" },
-              ]}
             />
 
             <Field
@@ -492,7 +467,6 @@ export default function EtiquetasPage() {
               <LabelPreview
                 category={selectedCategory}
                 product={selectedProduct}
-                codeType={codeType}
                 codeText={codeText}
               />
             </div>
@@ -558,7 +532,6 @@ export default function EtiquetasPage() {
                             <PrintableLabel
                               category={category}
                               product={product}
-                              codeType={item.codeType}
                               codeText={item.codeText}
                             />
                           ) : (

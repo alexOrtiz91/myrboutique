@@ -13,7 +13,6 @@ CREATE TABLE
     id TEXT PRIMARY KEY,
     label TEXT NOT NULL,
     genero TEXT,
-    value_type TEXT NOT NULL DEFAULT 'text',
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now ()
   );
@@ -46,7 +45,7 @@ CREATE TABLE
     tipo TEXT,
     genero TEXT,
     talla TEXT NOT NULL,
-    barcode TEXT UNIQUE NOT NULL,
+    code TEXT UNIQUE NOT NULL,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now ()
   );
@@ -96,33 +95,21 @@ CREATE TABLE
   );
 
 INSERT INTO
-  size_profiles (id, label, genero, value_type)
+  size_profiles (id, label, genero)
 VALUES
-  (
-    'pantalon_dama',
-    'Pantalón Dama',
-    'Dama',
-    'numeric'
-  ),
+  ('pantalon_dama', 'Pantalón Dama', 'Dama'),
   (
     'pantalon_caballero',
     'Pantalón Caballero',
-    'Caballero',
-    'numeric'
+    'Caballero'
   ),
-  (
-    'pantalon_nino',
-    'Pantalón Niño',
-    'Niño',
-    'numeric'
-  ),
-  ('ropa_bebe', 'Ropa Bebé', 'Bebé', 'text'),
-  ('calzado_dama', 'Calzado Dama', 'Dama', 'numeric'),
+  ('pantalon_nino', 'Pantalón Niño', 'Niño'),
+  ('ropa_bebe', 'Ropa Bebé', 'Bebé'),
+  ('calzado_dama', 'Calzado Dama', 'Dama'),
   (
     'calzado_caballero',
     'Calzado Caballero',
-    'Caballero',
-    'numeric'
+    'Caballero'
   );
 
 INSERT INTO
