@@ -687,7 +687,13 @@ export default function TiendaAdminPage() {
 
   const [editingInventoryProductCode, setEditingInventoryProductCode] =
     useState(null);
+  const productsSearchInputRef = useRef(null);
+  const inventorySearchInputRef = useRef(null);
   const [inventoryStockDraft, setInventoryStockDraft] = useState("");
+  const [openInventoryCategoryId, setOpenInventoryCategoryId] = useState("");
+  const [openProductsCategoryId, setOpenProductsCategoryId] = useState("");
+  const [inventorySearchText, setInventorySearchText] = useState("");
+  const [productsSearchText, setProductsSearchText] = useState("");
 
   const [selectedCatalogCategoryId, setSelectedCatalogCategoryId] =
     useState(null);
@@ -723,6 +729,29 @@ export default function TiendaAdminPage() {
 
   const closeInventoryAdjustRow = useCallback(() => {
     setEditingInventoryProductCode(null);
+  }, []);
+
+  const toggleInventoryCategory = useCallback(
+    (categoryId) => {
+      const id = String(categoryId || "").trim();
+      if (!id) return;
+      setOpenInventoryCategoryId((prev) => {
+        if (prev === id) {
+          closeInventoryAdjustRow();
+          return "";
+        }
+        return id;
+      });
+    },
+    [closeInventoryAdjustRow],
+  );
+
+  const toggleProductsCategory = useCallback((categoryId) => {
+    const id = String(categoryId || "").trim();
+    if (!id) return;
+    setSelectedProductCode(null);
+    setEditingProductCode(null);
+    setOpenProductsCategoryId((prev) => (prev === id ? "" : id));
   }, []);
 
   const openCreateCategory = useCallback(() => {
@@ -913,6 +942,54 @@ export default function TiendaAdminPage() {
       return collator.compare(String(a?.code || ""), String(b?.code || ""));
     });
   }, [productsWithDetails, categories, sizeProfiles]);
+
+  const inventoryByCategory = useMemo(() => {
+    const map = {};
+    for (const p of productsForInventory) {
+      const categoryId = String(p?.categoryId || "").trim();
+      if (!categoryId) continue;
+      if (!map[categoryId]) {
+        map[categoryId] = {
+          categoryId,
+          categoryName: String(p?.categoryName || "").trim() || categoryId,
+          items: [],
+          totalStock: 0,
+        };
+      }
+      map[categoryId].items.push(p);
+      map[categoryId].totalStock += Number(p?.stock ?? 0) || 0;
+    }
+
+    return Object.values(map);
+  }, [productsForInventory]);
+
+  const productsByCategoryFiltered = useMemo(() => {
+    const q = String(productsSearchText || "")
+      .trim()
+      .toLowerCase();
+    if (!q) return inventoryByCategory;
+    return inventoryByCategory.filter((g) =>
+      (g?.items || []).some((p) =>
+        String(p?.code || "")
+          .toLowerCase()
+          .includes(q),
+      ),
+    );
+  }, [inventoryByCategory, productsSearchText]);
+
+  const inventoryByCategoryFiltered = useMemo(() => {
+    const q = String(inventorySearchText || "")
+      .trim()
+      .toLowerCase();
+    if (!q) return inventoryByCategory;
+    return inventoryByCategory.filter((g) =>
+      (g?.items || []).some((p) =>
+        String(p?.code || "")
+          .toLowerCase()
+          .includes(q),
+      ),
+    );
+  }, [inventoryByCategory, inventorySearchText]);
 
   const productHasStock = useMemo(() => {
     const out = {};
@@ -1444,6 +1521,7 @@ export default function TiendaAdminPage() {
 
   function beginEditProduct(product) {
     closeAllCatalogForms();
+    setOpenProductsCategoryId(String(product?.categoryId || "").trim());
     setSelectedProductCode(String(product?.code || "").trim() || null);
     setEditingProductCode(String(product?.code || "").trim() || null);
     setEditProductCategoryId(String(product?.categoryId || "").trim());
@@ -1841,6 +1919,8 @@ export default function TiendaAdminPage() {
     const code = String(product?.code || "").trim();
     if (!code) return;
     closeAllCatalogForms();
+    const categoryId = String(product?.categoryId || "").trim();
+    if (categoryId) setOpenInventoryCategoryId(categoryId);
     setEditingInventoryProductCode(code);
     const current = Number(stockByProductCode?.[code] ?? 0);
     const safeCurrent =
@@ -2566,158 +2646,244 @@ export default function TiendaAdminPage() {
                 </div>
               </div>
             ) : null}
-            <div className="overflow-x-auto rounded-2xl ring-1 ring-slate-200">
-              <div className="w-full">
-                <div className="grid grid-cols-12 bg-slate-50 px-4 py-3 text-xs font-extrabold uppercase tracking-wide text-slate-600">
-                  <div className="col-span-1">No.</div>
-                  <div className="col-span-2">Género</div>
-                  <div className="col-span-6">Categoría</div>
-                  <div className="col-span-1">Talla</div>
-                  <div className="col-span-1 text-right">Precio</div>
-                  <div className="col-span-1 text-right">Stock</div>
-                </div>
-                <div className="divide-y divide-slate-200 bg-white">
-                  {productsForInventory.map((p) => {
-                    const isSelected = selectedProductCode === p.code;
-                    const isEditing = editingProductCode === p.code;
-                    const hasStock = Boolean(productHasStock?.[p.code]);
-                    return (
-                      <div
-                        key={p.code}
-                        ref={isEditing ? editProductLayerRef : null}
-                        className={isSelected ? "bg-slate-50" : ""}
-                      >
-                        <div
-                          onClick={() => {
-                            if (isEditing) {
-                              cancelEditProduct();
-                              return;
-                            }
-                            if (isSelected) {
-                              setSelectedProductCode(null);
-                              return;
-                            }
-                            closeAllCatalogForms();
-                            setSelectedProductCode(p.code);
-                          }}
-                          className="grid grid-cols-12 px-4 py-3 text-base font-semibold cursor-pointer"
-                        >
-                          <div className="col-span-1 tabular-nums">
-                            {p.code}
-                          </div>
-                          <div className="col-span-2">{p.genero || "—"}</div>
-                          <div className="col-span-6 text-slate-600">
-                            {p.categoryName}
-                          </div>
-                          <div className="col-span-1">{p.talla || "—"}</div>
-                          <div className="col-span-1 text-right tabular-nums">
-                            {p.price === null ? "—" : `$${p.price}`}
-                          </div>
-                          <div className="col-span-1 text-right tabular-nums">
-                            {p.stock}
-                          </div>
-                        </div>
 
-                        {isSelected ? (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            className="px-4 pb-4"
-                          >
-                            {!isEditing ? (
-                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                <BigButton
-                                  className="w-full disabled:opacity-60 disabled:cursor-not-allowed"
-                                  variant="secondary"
-                                  disabled={hasStock}
-                                  onClick={() => beginEditProduct(p)}
-                                >
-                                  Editar
-                                </BigButton>
-                                <BigButton
-                                  className="w-full disabled:opacity-60 disabled:cursor-not-allowed"
-                                  variant="danger"
-                                  disabled={hasStock}
-                                  onClick={() => deleteProduct(p.code)}
-                                >
-                                  Eliminar
-                                </BigButton>
-                                {hasStock ? (
-                                  <div className="text-sm font-semibold text-slate-600 sm:col-span-2">
-                                    No se puede editar o eliminar porque tiene
-                                    stock.
-                                  </div>
-                                ) : null}
+            <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end">
+              <Field
+                label="Buscar por No."
+                value={productsSearchText}
+                onChange={(e) => setProductsSearchText(e.target.value)}
+                placeholder="Ej. 104"
+                className="w-full"
+                inputRef={productsSearchInputRef}
+              />
+              <BigButton
+                className="w-full sm:w-40"
+                variant="secondary"
+                disabled={!String(productsSearchText || "").trim()}
+                onClick={() => {
+                  setProductsSearchText("");
+                  setOpenProductsCategoryId("");
+                  setSelectedProductCode(null);
+                  setEditingProductCode(null);
+                  requestAnimationFrame(() => {
+                    productsSearchInputRef?.current?.focus?.();
+                  });
+                }}
+              >
+                Limpiar
+              </BigButton>
+            </div>
+
+            <div className="mt-4 overflow-x-auto rounded-2xl ring-1 ring-slate-200">
+              <div className="w-full">
+                <div className="divide-y divide-slate-200 bg-white">
+                  {productsByCategoryFiltered.map((g) => {
+                    const isOpen = openProductsCategoryId === g.categoryId;
+                    return (
+                      <div key={g.categoryId}>
+                        <button
+                          type="button"
+                          onClick={() => toggleProductsCategory(g.categoryId)}
+                          className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-base font-extrabold">
+                              {g.categoryName}
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-slate-600">
+                              {g.items.length} tallas · Total:{" "}
+                              <span className="font-extrabold tabular-nums">
+                                {g.totalStock}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-sm font-extrabold text-slate-700">
+                            {isOpen ? "—" : "+"}
+                          </div>
+                        </button>
+
+                        {isOpen ? (
+                          <div className="border-t border-slate-200 bg-slate-50">
+                            <div className="grid grid-cols-12 bg-slate-50 px-4 py-3 text-xs font-extrabold uppercase tracking-wide text-slate-600">
+                              <div className="col-span-1">No.</div>
+                              <div className="col-span-2">Género</div>
+                              <div className="col-span-6">Categoría</div>
+                              <div className="col-span-1">Talla</div>
+                              <div className="col-span-1 text-right">
+                                Precio
                               </div>
-                            ) : (
-                              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                <SelectField
-                                  label="Categoría"
-                                  value={effectiveEditProductCategoryId}
-                                  disabled={hasStock}
-                                  onChange={(e) => {
-                                    const id = e.target.value;
-                                    setEditProductCategoryId(id);
-                                    setEditProductTalla("");
-                                  }}
-                                  options={[
-                                    { value: "", label: "Selecciona…" },
-                                    ...categories.map((c) => ({
-                                      value: c.id,
-                                      label: `${c.name} ($${c.price} / $${c.creditPrice ?? c.price} / $${c.wholesalePrice ?? c.price})`,
-                                    })),
-                                  ]}
-                                />
-                                <SelectField
-                                  label="Talla"
-                                  value={effectiveEditProductTalla}
-                                  disabled={hasStock}
-                                  onChange={(e) =>
-                                    setEditProductTalla(e.target.value)
-                                  }
-                                  options={[
-                                    { value: "", label: "Selecciona…" },
-                                    ...availableTallasForEditProduct.map(
-                                      (t) => ({
-                                        value: t,
-                                        label: t,
-                                      }),
-                                    ),
-                                  ]}
-                                />
-                                <div className="grid grid-cols-2 gap-3 sm:col-span-2">
-                                  <BigButton
-                                    className="w-full disabled:opacity-60 disabled:cursor-not-allowed"
-                                    disabled={
-                                      hasStock ||
-                                      !effectiveEditProductCategoryId ||
-                                      !effectiveEditProductTalla
-                                    }
-                                    onClick={saveEditProduct}
+                              <div className="col-span-1 text-right">Stock</div>
+                            </div>
+                            <div className="divide-y divide-slate-200 bg-white">
+                              {g.items.map((p) => {
+                                const isSelected =
+                                  selectedProductCode === p.code;
+                                const isEditing = editingProductCode === p.code;
+                                const hasStock = Boolean(
+                                  productHasStock?.[p.code],
+                                );
+                                return (
+                                  <div
+                                    key={p.code}
+                                    ref={isEditing ? editProductLayerRef : null}
+                                    className={isSelected ? "bg-slate-50" : ""}
                                   >
-                                    Guardar
-                                  </BigButton>
-                                  <BigButton
-                                    className="w-full"
-                                    variant="secondary"
-                                    onClick={cancelEditProduct}
-                                  >
-                                    Cancelar
-                                  </BigButton>
-                                </div>
-                                {hasStock ? (
-                                  <div className="text-sm font-semibold text-slate-600 sm:col-span-2">
-                                    No se puede editar este producto porque
-                                    tiene stock.
+                                    <div
+                                      onClick={() => {
+                                        if (isEditing) {
+                                          cancelEditProduct();
+                                          return;
+                                        }
+                                        if (isSelected) {
+                                          setSelectedProductCode(null);
+                                          return;
+                                        }
+                                        closeAllCatalogForms();
+                                        setSelectedProductCode(p.code);
+                                      }}
+                                      className="grid grid-cols-12 px-4 py-3 text-base font-semibold cursor-pointer"
+                                    >
+                                      <div className="col-span-1 tabular-nums">
+                                        {p.code}
+                                      </div>
+                                      <div className="col-span-2">
+                                        {p.genero || "—"}
+                                      </div>
+                                      <div className="col-span-6 text-slate-600">
+                                        {p.categoryName}
+                                      </div>
+                                      <div className="col-span-1">
+                                        {p.talla || "—"}
+                                      </div>
+                                      <div className="col-span-1 text-right tabular-nums">
+                                        {p.price === null ? "—" : `$${p.price}`}
+                                      </div>
+                                      <div className="col-span-1 text-right tabular-nums">
+                                        {p.stock}
+                                      </div>
+                                    </div>
+
+                                    {isSelected ? (
+                                      <div
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="px-4 pb-4"
+                                      >
+                                        {!isEditing ? (
+                                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                            <BigButton
+                                              className="w-full disabled:opacity-60 disabled:cursor-not-allowed"
+                                              variant="secondary"
+                                              disabled={hasStock}
+                                              onClick={() =>
+                                                beginEditProduct(p)
+                                              }
+                                            >
+                                              Editar
+                                            </BigButton>
+                                            <BigButton
+                                              className="w-full disabled:opacity-60 disabled:cursor-not-allowed"
+                                              variant="danger"
+                                              disabled={hasStock}
+                                              onClick={() =>
+                                                deleteProduct(p.code)
+                                              }
+                                            >
+                                              Eliminar
+                                            </BigButton>
+                                            {hasStock ? (
+                                              <div className="text-sm font-semibold text-slate-600 sm:col-span-2">
+                                                No se puede editar o eliminar
+                                                porque tiene stock.
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        ) : (
+                                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                            <SelectField
+                                              label="Categoría"
+                                              value={
+                                                effectiveEditProductCategoryId
+                                              }
+                                              disabled={hasStock}
+                                              onChange={(e) => {
+                                                const id = e.target.value;
+                                                setEditProductCategoryId(id);
+                                                setEditProductTalla("");
+                                              }}
+                                              options={[
+                                                {
+                                                  value: "",
+                                                  label: "Selecciona…",
+                                                },
+                                                ...categories.map((c) => ({
+                                                  value: c.id,
+                                                  label: `${c.name} ($${c.price} / $${c.creditPrice ?? c.price} / $${c.wholesalePrice ?? c.price})`,
+                                                })),
+                                              ]}
+                                            />
+                                            <SelectField
+                                              label="Talla"
+                                              value={effectiveEditProductTalla}
+                                              disabled={hasStock}
+                                              onChange={(e) =>
+                                                setEditProductTalla(
+                                                  e.target.value,
+                                                )
+                                              }
+                                              options={[
+                                                {
+                                                  value: "",
+                                                  label: "Selecciona…",
+                                                },
+                                                ...availableTallasForEditProduct.map(
+                                                  (t) => ({
+                                                    value: t,
+                                                    label: t,
+                                                  }),
+                                                ),
+                                              ]}
+                                            />
+                                            <div className="grid grid-cols-2 gap-3 sm:col-span-2">
+                                              <BigButton
+                                                className="w-full disabled:opacity-60 disabled:cursor-not-allowed"
+                                                disabled={
+                                                  hasStock ||
+                                                  !effectiveEditProductCategoryId ||
+                                                  !effectiveEditProductTalla
+                                                }
+                                                onClick={saveEditProduct}
+                                              >
+                                                Guardar
+                                              </BigButton>
+                                              <BigButton
+                                                className="w-full"
+                                                variant="secondary"
+                                                onClick={cancelEditProduct}
+                                              >
+                                                Cancelar
+                                              </BigButton>
+                                            </div>
+                                            {hasStock ? (
+                                              <div className="text-sm font-semibold text-slate-600 sm:col-span-2">
+                                                No se puede editar este producto
+                                                porque tiene stock.
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : null}
                                   </div>
-                                ) : null}
-                              </div>
-                            )}
+                                );
+                              })}
+                            </div>
                           </div>
                         ) : null}
                       </div>
                     );
                   })}
-                  {!productsWithDetails.length ? (
+
+                  {!productsByCategoryFiltered.length ? (
                     <div className="px-4 py-4 text-sm font-semibold text-slate-600">
                       Sin productos
                     </div>
@@ -2800,149 +2966,226 @@ export default function TiendaAdminPage() {
           </div>
 
           <Panel
-            title="Inventario por producto"
-            subtitle="No., Género, Categoría, Talla, Precio y Stock."
+            title="Inventario por categoría"
+            subtitle="Da click a una categoría para ver tallas y total."
           >
-            <div className="overflow-x-auto rounded-2xl ring-1 ring-slate-200">
+            <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end">
+              <Field
+                label="Buscar por No."
+                value={inventorySearchText}
+                onChange={(e) => setInventorySearchText(e.target.value)}
+                placeholder="Ej. 104"
+                className="w-full"
+                inputRef={inventorySearchInputRef}
+              />
+              <BigButton
+                className="w-full sm:w-40"
+                variant="secondary"
+                disabled={!String(inventorySearchText || "").trim()}
+                onClick={() => {
+                  setInventorySearchText("");
+                  setOpenInventoryCategoryId("");
+                  closeInventoryAdjustRow();
+                  requestAnimationFrame(() => {
+                    inventorySearchInputRef?.current?.focus?.();
+                  });
+                }}
+              >
+                Limpiar
+              </BigButton>
+            </div>
+
+            <div className="mt-4 overflow-x-auto rounded-2xl ring-1 ring-slate-200">
               <div className="w-full">
-                <div className="grid grid-cols-12 bg-slate-50 px-4 py-3 text-xs font-extrabold uppercase tracking-wide text-slate-600">
-                  <div className="col-span-1">No.</div>
-                  <div className="col-span-2">Género</div>
-                  <div className="col-span-6">Categoría</div>
-                  <div className="col-span-1">Talla</div>
-                  <div className="col-span-1 text-right">Precio</div>
-                  <div className="col-span-1 text-right">Stock</div>
-                </div>
                 <div className="divide-y divide-slate-200 bg-white">
-                  {productsForInventory.map((p) => {
-                    const isEditing =
-                      String(p?.code || "").trim() ===
-                        String(editingInventoryProductCode || "").trim() &&
-                      Boolean(editingInventoryProductCode);
+                  {inventoryByCategoryFiltered.map((g) => {
+                    const isOpen = openInventoryCategoryId === g.categoryId;
                     return (
-                      <div
-                        key={p.code}
-                        ref={isEditing ? inventoryAdjustLayerRef : null}
-                        className={isEditing ? "bg-slate-50" : ""}
-                      >
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => {
-                            if (isEditing) {
-                              closeInventoryAdjustRow();
-                              return;
-                            }
-                            beginInventoryAdjustRow(p);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              if (isEditing) {
-                                closeInventoryAdjustRow();
-                                return;
-                              }
-                              beginInventoryAdjustRow(p);
-                            }
-                          }}
-                          className="grid grid-cols-12 px-4 py-3 text-base font-semibold cursor-pointer"
+                      <div key={g.categoryId}>
+                        <button
+                          type="button"
+                          onClick={() => toggleInventoryCategory(g.categoryId)}
+                          className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
                         >
-                          <div className="col-span-1 tabular-nums">
-                            {p.code}
+                          <div className="min-w-0">
+                            <div className="truncate text-base font-extrabold">
+                              {g.categoryName}
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-slate-600">
+                              {g.items.length} tallas · Total:{" "}
+                              <span className="font-extrabold tabular-nums">
+                                {g.totalStock}
+                              </span>
+                            </div>
                           </div>
-                          <div className="col-span-2">{p.genero || "—"}</div>
-                          <div className="col-span-6 text-slate-600">
-                            {p.categoryName}
+                          <div className="shrink-0 text-sm font-extrabold text-slate-700">
+                            {isOpen ? "—" : "+"}
                           </div>
-                          <div className="col-span-1">{p.talla || "—"}</div>
-                          <div className="col-span-1 text-right tabular-nums">
-                            {p.price === null ? "—" : `$${p.price}`}
-                          </div>
-                          <div className="col-span-1 text-right tabular-nums">
-                            {p.stock}
-                          </div>
-                        </div>
+                        </button>
 
-                        {isEditing ? (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            className="px-4 pb-4"
-                          >
-                            <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-6 sm:items-end">
-                                <div className="sm:col-span-3">
-                                  <div className="text-sm font-extrabold text-slate-700">
-                                    Stock
-                                  </div>
-                                  <input
-                                    value={inventoryStockDraft}
-                                    onChange={(e) =>
-                                      setInventoryStockDraft(e.target.value)
-                                    }
-                                    inputMode="numeric"
-                                    type="number"
-                                    min="0"
-                                    step="1"
-                                    className={[
-                                      "mt-2 h-12 w-full rounded-2xl bg-white px-4 text-base font-semibold",
-                                      "ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900",
-                                    ].join(" ")}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        void saveInventoryAdjustRow();
-                                      }
-                                      if (e.key === "Escape") {
-                                        e.preventDefault();
-                                        closeInventoryAdjustRow();
-                                      }
-                                    }}
-                                  />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2 sm:col-span-3">
-                                  <button
-                                    type="button"
-                                    onClick={() => bumpInventoryDraft(-1)}
-                                    className="h-12 rounded-2xl bg-white text-base font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
-                                  >
-                                    −
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => bumpInventoryDraft(+1)}
-                                    className="h-12 rounded-2xl bg-white text-base font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2 sm:col-span-6">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      void saveInventoryAdjustRow()
-                                    }
-                                    className="h-12 rounded-2xl bg-slate-900 px-4 text-sm font-extrabold text-white active:scale-[0.99]"
-                                  >
-                                    Guardar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={closeInventoryAdjustRow}
-                                    className="h-12 rounded-2xl bg-white px-4 text-sm font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
-                                  >
-                                    Cancelar
-                                  </button>
-                                </div>
+                        {isOpen ? (
+                          <div className="border-t border-slate-200 bg-slate-50">
+                            <div className="grid grid-cols-12 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-slate-600">
+                              <div className="col-span-2">No.</div>
+                              <div className="col-span-4">Género</div>
+                              <div className="col-span-2">Talla</div>
+                              <div className="col-span-2 text-right">
+                                Precio
                               </div>
+                              <div className="col-span-2 text-right">Stock</div>
+                            </div>
+                            <div className="divide-y divide-slate-200">
+                              {g.items.map((p) => {
+                                const isEditing =
+                                  String(p?.code || "").trim() ===
+                                    String(
+                                      editingInventoryProductCode || "",
+                                    ).trim() &&
+                                  Boolean(editingInventoryProductCode);
+                                return (
+                                  <div
+                                    key={p.code}
+                                    ref={
+                                      isEditing ? inventoryAdjustLayerRef : null
+                                    }
+                                    className={isEditing ? "bg-white" : ""}
+                                  >
+                                    <div
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={() => {
+                                        if (isEditing) {
+                                          closeInventoryAdjustRow();
+                                          return;
+                                        }
+                                        beginInventoryAdjustRow(p);
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (
+                                          e.key === "Enter" ||
+                                          e.key === " "
+                                        ) {
+                                          e.preventDefault();
+                                          if (isEditing) {
+                                            closeInventoryAdjustRow();
+                                            return;
+                                          }
+                                          beginInventoryAdjustRow(p);
+                                        }
+                                      }}
+                                      className="grid grid-cols-12 px-4 py-3 text-base font-semibold cursor-pointer"
+                                    >
+                                      <div className="col-span-2 tabular-nums">
+                                        {p.code}
+                                      </div>
+                                      <div className="col-span-4">
+                                        {p.genero || "—"}
+                                      </div>
+                                      <div className="col-span-2">
+                                        {p.talla || "—"}
+                                      </div>
+                                      <div className="col-span-2 text-right tabular-nums">
+                                        {p.price === null ? "—" : `$${p.price}`}
+                                      </div>
+                                      <div className="col-span-2 text-right tabular-nums">
+                                        {p.stock}
+                                      </div>
+                                    </div>
+
+                                    {isEditing ? (
+                                      <div
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="px-4 pb-4"
+                                      >
+                                        <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+                                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-6 sm:items-end">
+                                            <div className="sm:col-span-3">
+                                              <div className="text-sm font-extrabold text-slate-700">
+                                                Stock
+                                              </div>
+                                              <input
+                                                value={inventoryStockDraft}
+                                                onChange={(e) =>
+                                                  setInventoryStockDraft(
+                                                    e.target.value,
+                                                  )
+                                                }
+                                                inputMode="numeric"
+                                                type="number"
+                                                min="0"
+                                                step="1"
+                                                className={[
+                                                  "mt-2 h-12 w-full rounded-2xl bg-white px-4 text-base font-semibold",
+                                                  "ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900",
+                                                ].join(" ")}
+                                                onKeyDown={(e) => {
+                                                  if (e.key === "Enter") {
+                                                    e.preventDefault();
+                                                    void saveInventoryAdjustRow();
+                                                  }
+                                                  if (e.key === "Escape") {
+                                                    e.preventDefault();
+                                                    closeInventoryAdjustRow();
+                                                  }
+                                                }}
+                                              />
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-2 sm:col-span-3">
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  bumpInventoryDraft(-1)
+                                                }
+                                                className="h-12 rounded-2xl bg-white text-base font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
+                                              >
+                                                −
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  bumpInventoryDraft(+1)
+                                                }
+                                                className="h-12 rounded-2xl bg-white text-base font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
+                                              >
+                                                +
+                                              </button>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-2 sm:col-span-6">
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  void saveInventoryAdjustRow()
+                                                }
+                                                className="h-12 rounded-2xl bg-slate-900 px-4 text-sm font-extrabold text-white active:scale-[0.99]"
+                                              >
+                                                Guardar
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={
+                                                  closeInventoryAdjustRow
+                                                }
+                                                className="h-12 rounded-2xl bg-white px-4 text-sm font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
+                                              >
+                                                Cancelar
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         ) : null}
                       </div>
                     );
                   })}
-                  {!productsWithDetails.length ? (
+                  {!inventoryByCategory.length ? (
                     <div className="px-4 py-4 text-sm font-semibold text-slate-600">
                       Sin productos
                     </div>

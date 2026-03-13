@@ -6,12 +6,14 @@ export default function Field({
   type = "text",
   inputMode,
   className = "",
+  inputRef,
   ...props
 }) {
   return (
     <label className={["block", className].join(" ")}>
       <div className="text-sm font-extrabold text-slate-700">{label}</div>
       <input
+        ref={inputRef}
         value={value}
         onChange={onChange}
         placeholder={placeholder}

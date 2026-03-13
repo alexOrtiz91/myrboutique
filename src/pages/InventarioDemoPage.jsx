@@ -120,6 +120,7 @@ export default function InventarioDemoPage() {
   );
   const [selectedProductCode, setSelectedProductCode] = useState("");
   const [qty, setQty] = useState("1");
+  const [openCategoryId, setOpenCategoryId] = useState("");
 
   const effectiveSelectedCategoryId = useMemo(() => {
     const first = categories[0]?.id || "";
@@ -157,6 +158,52 @@ export default function InventarioDemoPage() {
         : true,
     );
   }, [productsWithDetails, effectiveSelectedCategoryId]);
+
+  const inventoryByCategory = useMemo(() => {
+    const map = {};
+    for (const p of productsWithDetails) {
+      const categoryId = String(p?.categoryId || "").trim();
+      if (!categoryId) continue;
+      if (!map[categoryId]) {
+        map[categoryId] = {
+          categoryId,
+          categoryName: p?.categoryName || categoryId,
+          items: [],
+          totalStock: 0,
+        };
+      }
+      map[categoryId].items.push(p);
+      map[categoryId].totalStock += Number(p?.stock ?? 0) || 0;
+    }
+    const groups = Object.values(map);
+    for (const g of groups) {
+      g.items.sort((a, b) => {
+        const ta = String(a?.talla || "");
+        const tb = String(b?.talla || "");
+        const tcmp = ta.localeCompare(tb, "es", { numeric: true });
+        if (tcmp !== 0) return tcmp;
+        return String(a?.code || "").localeCompare(
+          String(b?.code || ""),
+          "es",
+          {
+            numeric: true,
+          },
+        );
+      });
+    }
+    groups.sort((a, b) =>
+      String(a?.categoryName || "").localeCompare(
+        String(b?.categoryName || ""),
+      ),
+    );
+    return groups;
+  }, [productsWithDetails]);
+
+  function toggleCategory(categoryId) {
+    const id = String(categoryId || "").trim();
+    if (!id) return;
+    setOpenCategoryId((prev) => (prev === id ? "" : id));
+  }
 
   const effectiveSelectedProductCode = useMemo(() => {
     const first = productsForSelection[0]?.code || "";
@@ -258,38 +305,75 @@ export default function InventarioDemoPage() {
         <section className="space-y-4">
           <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200 sm:p-6">
             <div className="text-lg font-extrabold tracking-tight">
-              Inventario por producto
+              Inventario por categoría
             </div>
             <div className="mt-4 overflow-hidden rounded-2xl ring-1 ring-slate-200">
-              <div className="grid grid-cols-12 bg-slate-50 px-4 py-3 text-xs font-extrabold uppercase tracking-wide text-slate-600">
-                <div className="col-span-1">No.</div>
-                <div className="col-span-2">Género</div>
-                <div className="col-span-6">Categoría</div>
-                <div className="col-span-1">Talla</div>
-                <div className="col-span-1 text-right">Precio</div>
-                <div className="col-span-1 text-right">Stock</div>
-              </div>
               <div className="divide-y divide-slate-200 bg-white">
-                {productsWithDetails.map((p) => (
-                  <div
-                    key={p.code}
-                    className="grid grid-cols-12 px-4 py-3 text-base font-semibold"
-                  >
-                    <div className="col-span-1 tabular-nums">{p.code}</div>
-                    <div className="col-span-2">{p.genero || "—"}</div>
-                    <div className="col-span-6 text-slate-600">
-                      {p.categoryName}
+                {inventoryByCategory.map((g) => {
+                  const isOpen = openCategoryId === g.categoryId;
+                  return (
+                    <div key={g.categoryId}>
+                      <button
+                        type="button"
+                        onClick={() => toggleCategory(g.categoryId)}
+                        className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-base font-extrabold">
+                            {g.categoryName}
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-slate-600">
+                            {g.items.length} tallas · Total:{" "}
+                            <span className="font-extrabold tabular-nums">
+                              {g.totalStock}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-sm font-extrabold text-slate-700">
+                          {isOpen ? "—" : "+"}
+                        </div>
+                      </button>
+
+                      {isOpen ? (
+                        <div className="border-t border-slate-200 bg-slate-50">
+                          <div className="grid grid-cols-12 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-slate-600">
+                            <div className="col-span-2">Talla</div>
+                            <div className="col-span-4">Producto</div>
+                            <div className="col-span-3">Género</div>
+                            <div className="col-span-2 text-right">Precio</div>
+                            <div className="col-span-1 text-right">Stock</div>
+                          </div>
+                          <div className="divide-y divide-slate-200">
+                            {g.items.map((p) => (
+                              <div
+                                key={p.code}
+                                className="grid grid-cols-12 px-4 py-3 text-sm font-semibold text-slate-900"
+                              >
+                                <div className="col-span-2">
+                                  {p.talla || "—"}
+                                </div>
+                                <div className="col-span-4 tabular-nums">
+                                  {p.code}
+                                </div>
+                                <div className="col-span-3 text-slate-700">
+                                  {p.genero || "—"}
+                                </div>
+                                <div className="col-span-2 text-right tabular-nums text-slate-700">
+                                  ${p.price}
+                                </div>
+                                <div className="col-span-1 text-right tabular-nums">
+                                  {p.stock}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="col-span-1">{p.talla || "—"}</div>
-                    <div className="col-span-1 text-right tabular-nums">
-                      ${p.price}
-                    </div>
-                    <div className="col-span-1 text-right tabular-nums">
-                      {p.stock}
-                    </div>
-                  </div>
-                ))}
-                {!productsWithDetails.length ? (
+                  );
+                })}
+
+                {!inventoryByCategory.length ? (
                   <div className="px-4 py-4 text-sm font-semibold text-slate-600">
                     Sin productos
                   </div>
