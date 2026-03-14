@@ -28,6 +28,23 @@ CREATE TABLE
   );
 
 CREATE TABLE
+  separator_sizes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+    name TEXT NOT NULL,
+    lines TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    font_size_mm NUMERIC NOT NULL DEFAULT 12,
+    line_gap_mm NUMERIC NOT NULL DEFAULT 5,
+    y_offset_mm NUMERIC NOT NULL DEFAULT 0,
+    side_offset_mm NUMERIC NOT NULL DEFAULT 0,
+    letter_spacing_mm NUMERIC NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now (),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now ()
+  );
+
+CREATE UNIQUE INDEX separator_sizes_name_unique_ci
+  ON separator_sizes (lower(btrim(name)));
+
+CREATE TABLE
   categories (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -165,3 +182,12 @@ VALUES
   ('calzado_caballero', '29', 9),
   ('calzado_caballero', '29.5', 10),
   ('calzado_caballero', '30', 11);
+
+INSERT INTO
+  separator_sizes (name, lines)
+VALUES
+  ('S', ARRAY['S']::TEXT[]),
+  ('M', ARRAY['M']::TEXT[]),
+  ('L', ARRAY['L']::TEXT[]),
+  ('XL', ARRAY['XL']::TEXT[]),
+  ('8 - 10', ARRAY['8', '-', '10']::TEXT[]);

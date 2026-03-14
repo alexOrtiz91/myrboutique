@@ -570,6 +570,292 @@ app.delete("/api/size-profiles/:id", async (req, res) => {
   }
 });
 
+app.get("/api/separator-sizes", async (_req, res) => {
+  try {
+    const { rows } = await query(
+      `
+        SELECT
+          id,
+          name,
+          lines,
+          font_size_mm,
+          line_gap_mm,
+          y_offset_mm,
+          side_offset_mm,
+          letter_spacing_mm
+        FROM separator_sizes
+        ORDER BY name ASC, created_at ASC
+      `,
+    );
+    res.json({
+      sizes: rows.map((r) => ({
+        id: String(r.id || "").trim(),
+        name: String(r.name || "").trim(),
+        lines: Array.isArray(r.lines)
+          ? r.lines.map((v) => String(v || "").trim())
+          : [],
+        fontSizeMm: Number(r.font_size_mm ?? 12),
+        lineGapMm: Number(r.line_gap_mm ?? 5),
+        yOffsetMm: Number(r.y_offset_mm ?? 0),
+        sideOffsetMm: Number(r.side_offset_mm ?? 0),
+        letterSpacingMm: Number(r.letter_spacing_mm ?? 0),
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.post("/api/separator-sizes", async (req, res) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "invalid_payload" });
+
+    const bodyLines = req.body?.lines;
+    const normalizeToken = (t) => {
+      const v = String(t || "").trim();
+      if (!v) return "";
+      if (v === "-" || v === "–" || v === "—" || v === "−") return "−";
+      return v;
+    };
+    const looksNumeric = (s) => /^\d/.test(String(s || "").trim());
+    const rawLines = Array.isArray(bodyLines)
+      ? bodyLines.map((v) => String(v || "").trim()).filter(Boolean)
+      : bodyLines === undefined || bodyLines === null
+        ? [name]
+        : String(bodyLines || "")
+            .split("\n")
+            .map((v) => String(v || "").trim())
+            .filter(Boolean);
+    let lines = rawLines.map(normalizeToken).filter(Boolean);
+    if (
+      lines.length === 2 &&
+      looksNumeric(lines[0]) &&
+      looksNumeric(lines[1])
+    ) {
+      lines = [lines[0], "−", lines[1]];
+    }
+    const fontSizeMm = Number(req.body?.fontSizeMm);
+    const lineGapMm = Number(req.body?.lineGapMm);
+    const yOffsetMm = Number(req.body?.yOffsetMm);
+    const sideOffsetMm = Number(req.body?.sideOffsetMm);
+    const letterSpacingMm = Number(req.body?.letterSpacingMm);
+
+    const { rows } = await query(
+      `
+        INSERT INTO separator_sizes (
+          name,
+          lines,
+          font_size_mm,
+          line_gap_mm,
+          y_offset_mm,
+          side_offset_mm,
+          letter_spacing_mm
+        )
+        VALUES (
+          $1,
+          $2,
+          COALESCE($3, 12::numeric),
+          COALESCE($4, 5::numeric),
+          COALESCE($5, 0::numeric),
+          COALESCE($6, 0::numeric),
+          COALESCE($7, 0::numeric)
+        )
+        RETURNING
+          id,
+          name,
+          lines,
+          font_size_mm,
+          line_gap_mm,
+          y_offset_mm,
+          side_offset_mm,
+          letter_spacing_mm
+      `,
+      [
+        name,
+        lines.length ? lines : [name],
+        Number.isFinite(fontSizeMm) ? fontSizeMm : null,
+        Number.isFinite(lineGapMm) ? lineGapMm : null,
+        Number.isFinite(yOffsetMm) ? yOffsetMm : null,
+        Number.isFinite(sideOffsetMm) ? sideOffsetMm : null,
+        Number.isFinite(letterSpacingMm) ? letterSpacingMm : null,
+      ],
+    );
+
+    const r = rows[0] || {};
+    res.json({
+      size: {
+        id: String(r.id || "").trim(),
+        name: String(r.name || "").trim(),
+        lines: Array.isArray(r.lines)
+          ? r.lines.map((v) => String(v || "").trim())
+          : [],
+        fontSizeMm: Number(r.font_size_mm ?? 12),
+        lineGapMm: Number(r.line_gap_mm ?? 5),
+        yOffsetMm: Number(r.y_offset_mm ?? 0),
+        sideOffsetMm: Number(r.side_offset_mm ?? 0),
+        letterSpacingMm: Number(r.letter_spacing_mm ?? 0),
+      },
+    });
+  } catch (e) {
+    if (String(e?.code || "") === "23505")
+      return res.status(409).json({ error: "duplicate_name" });
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.patch("/api/separator-sizes/:id", async (req, res) => {
+  try {
+    const id = String(req.params?.id || "").trim();
+    if (!id) return res.status(400).json({ error: "invalid_id" });
+
+    const body = req.body || {};
+    const hasName = Object.prototype.hasOwnProperty.call(body, "name");
+    const hasLines = Object.prototype.hasOwnProperty.call(body, "lines");
+    const hasFontSizeMm = Object.prototype.hasOwnProperty.call(
+      body,
+      "fontSizeMm",
+    );
+    const hasLineGapMm = Object.prototype.hasOwnProperty.call(
+      body,
+      "lineGapMm",
+    );
+    const hasYOffsetMm = Object.prototype.hasOwnProperty.call(
+      body,
+      "yOffsetMm",
+    );
+    const hasSideOffsetMm = Object.prototype.hasOwnProperty.call(
+      body,
+      "sideOffsetMm",
+    );
+    const hasLetterSpacingMm = Object.prototype.hasOwnProperty.call(
+      body,
+      "letterSpacingMm",
+    );
+
+    const name = hasName ? String(body.name || "").trim() : null;
+    if (hasName && !name)
+      return res.status(400).json({ error: "invalid_name" });
+
+    const normalizeToken = (t) => {
+      const v = String(t || "").trim();
+      if (!v) return "";
+      if (v === "-" || v === "–" || v === "—" || v === "−") return "−";
+      return v;
+    };
+    const looksNumeric = (s) => /^\d/.test(String(s || "").trim());
+    const bodyLines = hasLines ? body.lines : null;
+    const rawLines =
+      bodyLines === null
+        ? null
+        : Array.isArray(bodyLines)
+          ? bodyLines.map((v) => String(v || "").trim()).filter(Boolean)
+          : bodyLines === undefined
+            ? null
+            : String(bodyLines || "")
+                .split("\n")
+                .map((v) => String(v || "").trim())
+                .filter(Boolean);
+    let lines =
+      rawLines === null ? null : rawLines.map(normalizeToken).filter(Boolean);
+    if (
+      lines &&
+      lines.length === 2 &&
+      looksNumeric(lines[0]) &&
+      looksNumeric(lines[1])
+    ) {
+      lines = [lines[0], "−", lines[1]];
+    }
+
+    const fontSizeMm = hasFontSizeMm ? Number(body.fontSizeMm) : null;
+    const lineGapMm = hasLineGapMm ? Number(body.lineGapMm) : null;
+    const yOffsetMm = hasYOffsetMm ? Number(body.yOffsetMm) : null;
+    const sideOffsetMm = hasSideOffsetMm ? Number(body.sideOffsetMm) : null;
+    const letterSpacingMm = hasLetterSpacingMm
+      ? Number(body.letterSpacingMm)
+      : null;
+
+    const existing = await query(
+      `SELECT id, name FROM separator_sizes WHERE id = $1 LIMIT 1`,
+      [id],
+    );
+    const existingName = String(existing.rows?.[0]?.name || "").trim();
+    if (!existing.rows?.length || !existingName)
+      return res.status(404).json({ error: "not_found" });
+
+    const { rows } = await query(
+      `
+        UPDATE separator_sizes
+        SET name = COALESCE($2, name),
+            lines = COALESCE($3, lines),
+            font_size_mm = COALESCE($4, font_size_mm),
+            line_gap_mm = COALESCE($5, line_gap_mm),
+            y_offset_mm = COALESCE($6, y_offset_mm),
+            side_offset_mm = COALESCE($7, side_offset_mm),
+            letter_spacing_mm = COALESCE($8, letter_spacing_mm),
+            updated_at = now()
+        WHERE id = $1
+        RETURNING
+          id,
+          name,
+          lines,
+          font_size_mm,
+          line_gap_mm,
+          y_offset_mm,
+          side_offset_mm,
+          letter_spacing_mm
+      `,
+      [
+        id,
+        name,
+        lines ? (lines.length ? lines : [name || existingName]) : null,
+        Number.isFinite(fontSizeMm) ? fontSizeMm : null,
+        Number.isFinite(lineGapMm) ? lineGapMm : null,
+        Number.isFinite(yOffsetMm) ? yOffsetMm : null,
+        Number.isFinite(sideOffsetMm) ? sideOffsetMm : null,
+        Number.isFinite(letterSpacingMm) ? letterSpacingMm : null,
+      ],
+    );
+
+    const r = rows[0] || {};
+    res.json({
+      size: {
+        id: String(r.id || "").trim(),
+        name: String(r.name || "").trim(),
+        lines: Array.isArray(r.lines)
+          ? r.lines.map((v) => String(v || "").trim())
+          : [],
+        fontSizeMm: Number(r.font_size_mm ?? 12),
+        lineGapMm: Number(r.line_gap_mm ?? 5),
+        yOffsetMm: Number(r.y_offset_mm ?? 0),
+        sideOffsetMm: Number(r.side_offset_mm ?? 0),
+        letterSpacingMm: Number(r.letter_spacing_mm ?? 0),
+      },
+    });
+  } catch (e) {
+    if (String(e?.code || "") === "23505")
+      return res.status(409).json({ error: "duplicate_name" });
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.delete("/api/separator-sizes/:id", async (req, res) => {
+  try {
+    const id = String(req.params?.id || "").trim();
+    if (!id) return res.status(400).json({ error: "invalid_id" });
+
+    const deleted = await query(
+      `DELETE FROM separator_sizes WHERE id = $1 RETURNING id`,
+      [id],
+    );
+    if (!deleted.rows?.length)
+      return res.status(404).json({ error: "not_found" });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
 app.get("/api/catalog/categories", async (_req, res) => {
   try {
     const { rows } = await query(
