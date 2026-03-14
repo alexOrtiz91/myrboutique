@@ -12,14 +12,14 @@ const cards = [
     subtitle: "Códigos de barras / QR + hoja imprimible",
   },
   {
-    to: "/pos-demo",
-    title: "POS",
-    subtitle: "Ticket simple y flujo de escaneo (tablet)",
-  },
-  {
     to: "/inventario-demo",
     title: "Inventario",
     subtitle: "Conteo rápido por categoría usando escáner",
+  },
+  {
+    to: "/pos-demo",
+    title: "POS",
+    subtitle: "Ticket simple y flujo de escaneo (tablet)",
   },
 ];
 

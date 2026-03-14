@@ -230,6 +230,79 @@ app.post("/api/branches", async (req, res) => {
   }
 });
 
+app.patch("/api/branches/:id", async (req, res) => {
+  try {
+    const id = String(req.params?.id || "").trim();
+    const name = String(req.body?.name || "").trim();
+    if (!id) return res.status(400).json({ error: "invalid_id" });
+    if (!name) return res.status(400).json({ error: "invalid_payload" });
+
+    const dup = await query(
+      `SELECT 1 AS ok FROM branches WHERE name = $1 AND id <> $2 LIMIT 1`,
+      [name, id],
+    );
+    if (dup.rows?.length) return res.status(409).json({ error: "duplicate" });
+
+    const updated = await query(
+      `UPDATE branches SET name = $2 WHERE id = $1 RETURNING id, name`,
+      [id, name],
+    );
+    const r = updated.rows?.[0] || null;
+    if (!r) return res.status(404).json({ error: "not_found" });
+    res.json({ branch: { id: String(r.id || "").trim(), name: r.name } });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.delete("/api/branches/:id", async (req, res) => {
+  const client = pool ? await pool.connect() : null;
+  try {
+    if (!client) throw new Error("DATABASE_URL is not set");
+    const id = String(req.params?.id || "").trim();
+    if (!id) return res.status(400).json({ error: "invalid_id" });
+
+    await client.query("BEGIN");
+
+    const has = await client.query(
+      `SELECT 1 AS ok FROM inventory_counts WHERE branch_id = $1 AND qty > 0 LIMIT 1`,
+      [id],
+    );
+    if (has.rows?.length) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "has_stock" });
+    }
+
+    await client.query(`DELETE FROM stock_movements WHERE branch_id = $1`, [
+      id,
+    ]);
+    await client.query(`DELETE FROM inventory_counts WHERE branch_id = $1`, [
+      id,
+    ]);
+
+    const deleted = await client.query(
+      `DELETE FROM branches WHERE id = $1 RETURNING id`,
+      [id],
+    );
+    if (!deleted.rows?.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "not_found" });
+    }
+
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    try {
+      if (client) await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      void rollbackError;
+    }
+    res.status(500).json({ error: String(e?.message || e) });
+  } finally {
+    if (client) client.release();
+  }
+});
+
 app.get("/api/size-profiles", async (_req, res) => {
   try {
     const profilesRes = await query(
@@ -1073,9 +1146,6 @@ app.patch("/api/catalog/products/:code", async (req, res) => {
     if (!categoryId || !talla)
       return res.status(400).json({ error: "invalid_payload" });
 
-    const branchId = await getBranchIdForRequest(client, req);
-    if (!branchId) throw new Error("branch_not_found");
-
     await client.query("BEGIN");
 
     const pvRes = await client.query(
@@ -1095,15 +1165,14 @@ app.patch("/api/catalog/products/:code", async (req, res) => {
 
     const stockRes = await client.query(
       `
-        SELECT qty
+        SELECT 1 AS ok
         FROM inventory_counts
-        WHERE branch_id = $1 AND product_variant_id = $2
+        WHERE product_variant_id = $1 AND qty > 0
         LIMIT 1
       `,
-      [branchId, pv.id],
+      [pv.id],
     );
-    const qty = Number(stockRes.rows?.[0]?.qty ?? 0);
-    const hasStock = Number.isFinite(qty) && qty > 0;
+    const hasStock = Boolean(stockRes.rows?.length);
     const isChanging = pv.category_id !== categoryId || pv.talla !== talla;
     if (hasStock && isChanging) {
       await client.query("ROLLBACK");
@@ -1162,9 +1231,6 @@ app.delete("/api/catalog/products/:code", async (req, res) => {
     const code = String(req.params?.code || "").trim();
     if (!code) return res.status(400).json({ error: "invalid_code" });
 
-    const branchId = await getBranchIdForRequest(client, req);
-    if (!branchId) throw new Error("branch_not_found");
-
     await client.query("BEGIN");
     const pvRes = await client.query(
       `SELECT id FROM product_variants WHERE code = $1 AND active = TRUE LIMIT 1`,
@@ -1178,15 +1244,14 @@ app.delete("/api/catalog/products/:code", async (req, res) => {
 
     const stockRes = await client.query(
       `
-        SELECT qty
+        SELECT 1 AS ok
         FROM inventory_counts
-        WHERE branch_id = $1 AND product_variant_id = $2
+        WHERE product_variant_id = $1 AND qty > 0
         LIMIT 1
       `,
-      [branchId, productVariantId],
+      [productVariantId],
     );
-    const qty = Number(stockRes.rows?.[0]?.qty ?? 0);
-    if (Number.isFinite(qty) && qty > 0) {
+    if (stockRes.rows?.length) {
       await client.query("ROLLBACK");
       return res.status(409).json({ error: "has_stock" });
     }

@@ -677,6 +677,9 @@ export default function TiendaAdminPage() {
   const [isQuickAdjustOpen, setIsQuickAdjustOpen] = useState(false);
   const [isCreateBranchOpen, setIsCreateBranchOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
+  const [openBranchId, setOpenBranchId] = useState("");
+  const [editingBranchId, setEditingBranchId] = useState(null);
+  const [editBranchName, setEditBranchName] = useState("");
 
   const [newProductCategoryId, setNewProductCategoryId] = useState("");
   const [newProductTalla, setNewProductTalla] = useState("");
@@ -719,6 +722,8 @@ export default function TiendaAdminPage() {
     setIsCreateProductOpen(false);
     setIsQuickAdjustOpen(false);
     setIsCreateBranchOpen(false);
+    setEditingBranchId(null);
+    setEditBranchName("");
     setEditingCategoryId(null);
     setEditingProfileId(null);
     setSelectedProductCode(null);
@@ -1162,6 +1167,73 @@ export default function TiendaAdminPage() {
       await refreshStockFromApi(createdId);
     } catch (e) {
       window.alert(String(e?.message || e));
+    }
+  }
+
+  function beginEditBranch(branch) {
+    if (dataSource !== "api") return;
+    const id = String(branch?.id || "").trim();
+    if (!id) return;
+    closeAllCatalogForms();
+    setEditingBranchId(id);
+    setOpenBranchId(id);
+    setEditBranchName(String(branch?.name || "").trim());
+  }
+
+  function cancelEditBranch() {
+    setEditingBranchId(null);
+  }
+
+  async function saveEditBranch() {
+    if (dataSource !== "api") return;
+    const id = String(editingBranchId || "").trim();
+    const name = String(editBranchName || "").trim();
+    if (!id || !name) return;
+    try {
+      await apiSend(`/api/branches/${encodeURIComponent(id)}`, "PATCH", {
+        name,
+      });
+      await refreshBranchesFromApi();
+      setEditingBranchId(null);
+      setEditBranchName("");
+    } catch (e) {
+      window.alert(String(e?.message || e));
+    }
+  }
+
+  async function deleteBranch(branchId) {
+    if (dataSource !== "api") return;
+    const id = String(branchId || "").trim();
+    if (!id) return;
+    const branch = branches.find((b) => String(b?.id || "").trim() === id);
+    const name = String(branch?.name || "").trim() || "esta tienda";
+    const ok = window.confirm(`¿Seguro que quieres eliminar "${name}"?`);
+    if (!ok) return;
+
+    try {
+      await apiSend(`/api/branches/${encodeURIComponent(id)}`, "DELETE");
+    } catch (e) {
+      const message = String(e?.message || e);
+      if (message.includes("409") || message.includes("has_stock")) {
+        window.alert("No puedes eliminar esta tienda porque tiene stock.");
+        return;
+      }
+      window.alert(message);
+      return;
+    }
+
+    const next = await refreshBranchesFromApi();
+    if (String(selectedBranchId || "").trim() === id) {
+      const fallbackId = String(next?.[0]?.id || "").trim();
+      setSelectedBranchId(fallbackId);
+      if (fallbackId) await refreshStockFromApi(fallbackId);
+    }
+    if (openBranchId === id) {
+      setOpenBranchId("");
+    }
+    if (editingBranchId === id) {
+      setEditingBranchId(null);
+      setEditBranchName("");
     }
   }
 
@@ -1610,10 +1682,6 @@ export default function TiendaAdminPage() {
   async function saveEditProduct() {
     const code = String(editingProductCode || "").trim();
     if (!code) return;
-    if (productHasStock?.[code]) {
-      window.alert("No puedes editar este producto porque tiene stock.");
-      return;
-    }
 
     const categoryId = String(effectiveEditProductCategoryId || "").trim();
     const talla = String(effectiveEditProductTalla || "").trim();
@@ -1640,7 +1708,7 @@ export default function TiendaAdminPage() {
     if (dataSource === "api") {
       try {
         const r = await apiSend(
-          `/api/catalog/products/${encodeURIComponent(code)}?branchId=${encodeURIComponent(effectiveBranchId)}`,
+          `/api/catalog/products/${encodeURIComponent(code)}`,
           "PATCH",
           { categoryId, talla },
         );
@@ -1678,10 +1746,6 @@ export default function TiendaAdminPage() {
   async function deleteProduct(productCode) {
     const code = String(productCode || "").trim();
     if (!code) return;
-    if (productHasStock?.[code]) {
-      window.alert("No puedes eliminar este producto porque tiene stock.");
-      return;
-    }
 
     const product = productsWithDetails.find((p) => String(p.code) === code);
     const name = product?.categoryName
@@ -1696,7 +1760,7 @@ export default function TiendaAdminPage() {
     if (dataSource === "api") {
       try {
         await apiSend(
-          `/api/catalog/products/${encodeURIComponent(code)}?branchId=${encodeURIComponent(effectiveBranchId)}`,
+          `/api/catalog/products/${encodeURIComponent(code)}`,
           "DELETE",
         );
       } catch (e) {
@@ -2603,85 +2667,74 @@ export default function TiendaAdminPage() {
 
       {tab === "productos" ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div ref={createProductLayerRef}>
-            <Panel
-              title="Crear producto"
-              subtitle="El No. se genera automático. El precio viene de la categoría."
-              actions={
-                isCreateProductOpen ? (
-                  <XButton onClick={closeAllCatalogForms} />
-                ) : null
-              }
-            >
-              {!isCreateProductOpen ? (
-                <BigButton className="w-full" onClick={openCreateProduct}>
-                  Crear producto
-                </BigButton>
-              ) : (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <SelectField
-                    label="Categoría"
-                    value={effectiveNewProductCategoryId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setNewProductCategoryId(id);
-                      setNewProductTalla("");
-                    }}
-                    options={[
-                      { value: "", label: "Selecciona…" },
-                      ...categories.map((c) => ({
-                        value: c.id,
-                        label: `${c.name} ($${c.price} / $${c.creditPrice ?? c.price} / $${c.wholesalePrice ?? c.price})`,
-                      })),
-                    ]}
-                  />
-                  <SelectField
-                    label="Talla"
-                    value={effectiveNewProductTalla}
-                    onChange={(e) => setNewProductTalla(e.target.value)}
-                    options={[
-                      { value: "", label: "Selecciona…" },
-                      ...availableTallasForProduct.map((t) => ({
-                        value: t,
-                        label: t,
-                      })),
-                    ]}
-                  />
-                  <div className="sm:col-span-2">
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <BigButton className="w-full" onClick={addProduct}>
-                        Crear producto
-                      </BigButton>
-                      <BigButton
-                        className="w-full"
-                        variant="secondary"
-                        onClick={generateProductsForAllCategories}
-                      >
-                        Generar todas las tallas
-                      </BigButton>
+          <div className="space-y-4">
+            <div ref={createProductLayerRef}>
+              <Panel
+                title="Crear producto"
+                subtitle="El No. se genera automático. El precio viene de la categoría."
+                actions={
+                  isCreateProductOpen ? (
+                    <XButton onClick={closeAllCatalogForms} />
+                  ) : null
+                }
+              >
+                {!isCreateProductOpen ? (
+                  <BigButton className="w-full" onClick={openCreateProduct}>
+                    Crear producto
+                  </BigButton>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <SelectField
+                      label="Categoría"
+                      value={effectiveNewProductCategoryId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setNewProductCategoryId(id);
+                        setNewProductTalla("");
+                      }}
+                      options={[
+                        { value: "", label: "Selecciona…" },
+                        ...categories.map((c) => ({
+                          value: c.id,
+                          label: `${c.name} ($${c.price} / $${c.creditPrice ?? c.price} / $${c.wholesalePrice ?? c.price})`,
+                        })),
+                      ]}
+                    />
+                    <SelectField
+                      label="Talla"
+                      value={effectiveNewProductTalla}
+                      onChange={(e) => setNewProductTalla(e.target.value)}
+                      options={[
+                        { value: "", label: "Selecciona…" },
+                        ...availableTallasForProduct.map((t) => ({
+                          value: t,
+                          label: t,
+                        })),
+                      ]}
+                    />
+                    <div className="sm:col-span-2">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <BigButton className="w-full" onClick={addProduct}>
+                          Crear producto
+                        </BigButton>
+                        <BigButton
+                          className="w-full"
+                          variant="secondary"
+                          onClick={generateProductsForAllCategories}
+                        >
+                          Generar todas las tallas
+                        </BigButton>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </Panel>
-          </div>
+                )}
+              </Panel>
+            </div>
 
-          <Panel
-            title="Lista de productos"
-            subtitle="Persistente en este dispositivo."
-            actions={
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                <SelectField
-                  label="Tienda"
-                  value={effectiveBranchId}
-                  disabled={dataSource !== "api"}
-                  onChange={(e) => {
-                    closeAllCatalogForms();
-                    setSelectedBranchId(e.target.value);
-                  }}
-                  options={branchOptions}
-                  className="sm:min-w-[240px]"
-                />
+            <Panel
+              title="Tiendas"
+              subtitle="Los productos son iguales para todas las tiendas. El stock cambia por tienda."
+              actions={
                 <BigButton
                   variant="secondary"
                   className="whitespace-nowrap"
@@ -2696,40 +2749,142 @@ export default function TiendaAdminPage() {
                 >
                   Crear tienda
                 </BigButton>
-              </div>
-            }
-          >
-            {isCreateBranchOpen ? (
-              <div ref={createBranchLayerRef} className="mb-4">
-                <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-base font-extrabold">
-                        Crear tienda
+              }
+            >
+              {isCreateBranchOpen ? (
+                <div ref={createBranchLayerRef}>
+                  <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-base font-extrabold">
+                          Crear tienda
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-slate-600">
+                          Se usa para manejar el inventario por tienda.
+                        </div>
                       </div>
-                      <div className="mt-1 text-sm font-semibold text-slate-600">
-                        Se usa para manejar el inventario por tienda.
-                      </div>
+                      <XButton onClick={closeAllCatalogForms} />
                     </div>
-                    <XButton onClick={closeAllCatalogForms} />
-                  </div>
-                  <div className="mt-4 grid grid-cols-1 gap-4">
-                    <Field
-                      label="Nombre"
-                      value={newBranchName}
-                      onChange={(e) => setNewBranchName(e.target.value)}
-                      placeholder="Ej. Sucursal Centro"
-                    />
-                    <div>
-                      <BigButton className="w-full" onClick={createBranch}>
-                        Guardar tienda
-                      </BigButton>
+                    <div className="mt-4 grid grid-cols-1 gap-4">
+                      <Field
+                        label="Nombre"
+                        value={newBranchName}
+                        onChange={(e) => setNewBranchName(e.target.value)}
+                        placeholder="Ej. Sucursal Centro"
+                      />
+                      <div>
+                        <BigButton className="w-full" onClick={createBranch}>
+                          Guardar tienda
+                        </BigButton>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
 
+              <div className={isCreateBranchOpen ? "mt-4" : ""}>
+                {!branches.length ? (
+                  <div className="text-sm font-semibold text-slate-600">
+                    Sin tiendas
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {branches.map((b) => {
+                      const id = String(b?.id || "").trim();
+                      const key = id || String(b?.name || "").trim() || "—";
+                      const isEditing = id && id === editingBranchId;
+                      const isSelected = id && id === effectiveBranchId;
+                      const isOpen = id && id === openBranchId;
+                      const name = String(b?.name || "").trim() || "—";
+                      return (
+                        <div
+                          key={key}
+                          onClick={() => {
+                            if (!id) return;
+                            if (isEditing) return;
+                            closeAllCatalogForms();
+                            setOpenBranchId((prev) => (prev === id ? "" : id));
+                          }}
+                          className={[
+                            "rounded-2xl bg-white/70 p-4 ring-1 ring-slate-200 cursor-pointer",
+                            isOpen ? "ring-slate-900" : "",
+                            isSelected ? "bg-slate-50" : "",
+                          ].join(" ")}
+                        >
+                          {!isEditing ? (
+                            <div className="space-y-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-base font-extrabold">
+                                  {name}
+                                </div>
+                              </div>
+
+                              {isOpen ? (
+                                <div className="grid grid-cols-2 gap-2">
+                                  <BigButton
+                                    className="w-full"
+                                    variant="secondary"
+                                    disabled={dataSource !== "api"}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      beginEditBranch(b);
+                                    }}
+                                  >
+                                    Editar
+                                  </BigButton>
+                                  <BigButton
+                                    className="w-full"
+                                    variant="danger"
+                                    disabled={dataSource !== "api"}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteBranch(id);
+                                    }}
+                                  >
+                                    Eliminar
+                                  </BigButton>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <div
+                              className="space-y-3"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">
+                                <Field
+                                  label="Nombre"
+                                  value={editBranchName}
+                                  onChange={(e) =>
+                                    setEditBranchName(e.target.value)
+                                  }
+                                />
+                                <BigButton
+                                  className="w-full"
+                                  onClick={saveEditBranch}
+                                >
+                                  Guardar
+                                </BigButton>
+                                <BigButton
+                                  className="w-full"
+                                  variant="secondary"
+                                  onClick={cancelEditBranch}
+                                >
+                                  Cancelar
+                                </BigButton>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </Panel>
+          </div>
+
+          <Panel title="Lista de productos">
             <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end">
               <Field
                 label="Buscar por No."
@@ -2774,10 +2929,7 @@ export default function TiendaAdminPage() {
                               {g.categoryName}
                             </div>
                             <div className="mt-1 text-sm font-semibold text-slate-600">
-                              {g.items.length} tallas · Total:{" "}
-                              <span className="font-extrabold tabular-nums">
-                                {g.totalStock}
-                              </span>
+                              {g.items.length} tallas
                             </div>
                           </div>
                           <div className="shrink-0 text-sm font-extrabold text-slate-700">
@@ -2788,23 +2940,19 @@ export default function TiendaAdminPage() {
                         {isOpen ? (
                           <div className="border-t border-slate-200 bg-slate-50">
                             <div className="grid grid-cols-12 bg-slate-50 px-4 py-3 text-xs font-extrabold uppercase tracking-wide text-slate-600">
-                              <div className="col-span-1">No.</div>
+                              <div className="col-span-2">No.</div>
                               <div className="col-span-2">Género</div>
                               <div className="col-span-6">Categoría</div>
                               <div className="col-span-1">Talla</div>
                               <div className="col-span-1 text-right">
                                 Precio
                               </div>
-                              <div className="col-span-1 text-right">Stock</div>
                             </div>
                             <div className="divide-y divide-slate-200 bg-white">
                               {g.items.map((p) => {
                                 const isSelected =
                                   selectedProductCode === p.code;
                                 const isEditing = editingProductCode === p.code;
-                                const hasStock = Boolean(
-                                  productHasStock?.[p.code],
-                                );
                                 return (
                                   <div
                                     key={p.code}
@@ -2826,7 +2974,7 @@ export default function TiendaAdminPage() {
                                       }}
                                       className="grid grid-cols-12 px-4 py-3 text-base font-semibold cursor-pointer"
                                     >
-                                      <div className="col-span-1 tabular-nums">
+                                      <div className="col-span-2 tabular-nums">
                                         {p.code}
                                       </div>
                                       <div className="col-span-2">
@@ -2841,9 +2989,6 @@ export default function TiendaAdminPage() {
                                       <div className="col-span-1 text-right tabular-nums">
                                         {p.price === null ? "—" : `$${p.price}`}
                                       </div>
-                                      <div className="col-span-1 text-right tabular-nums">
-                                        {p.stock}
-                                      </div>
                                     </div>
 
                                     {isSelected ? (
@@ -2854,9 +2999,8 @@ export default function TiendaAdminPage() {
                                         {!isEditing ? (
                                           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                             <BigButton
-                                              className="w-full disabled:opacity-60 disabled:cursor-not-allowed"
+                                              className="w-full"
                                               variant="secondary"
-                                              disabled={hasStock}
                                               onClick={() =>
                                                 beginEditProduct(p)
                                               }
@@ -2864,21 +3008,14 @@ export default function TiendaAdminPage() {
                                               Editar
                                             </BigButton>
                                             <BigButton
-                                              className="w-full disabled:opacity-60 disabled:cursor-not-allowed"
+                                              className="w-full"
                                               variant="danger"
-                                              disabled={hasStock}
                                               onClick={() =>
                                                 deleteProduct(p.code)
                                               }
                                             >
                                               Eliminar
                                             </BigButton>
-                                            {hasStock ? (
-                                              <div className="text-sm font-semibold text-slate-600 sm:col-span-2">
-                                                No se puede editar o eliminar
-                                                porque tiene stock.
-                                              </div>
-                                            ) : null}
                                           </div>
                                         ) : (
                                           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -2887,7 +3024,6 @@ export default function TiendaAdminPage() {
                                               value={
                                                 effectiveEditProductCategoryId
                                               }
-                                              disabled={hasStock}
                                               onChange={(e) => {
                                                 const id = e.target.value;
                                                 setEditProductCategoryId(id);
@@ -2907,7 +3043,6 @@ export default function TiendaAdminPage() {
                                             <SelectField
                                               label="Talla"
                                               value={effectiveEditProductTalla}
-                                              disabled={hasStock}
                                               onChange={(e) =>
                                                 setEditProductTalla(
                                                   e.target.value,
@@ -2928,9 +3063,7 @@ export default function TiendaAdminPage() {
                                             />
                                             <div className="grid grid-cols-2 gap-3 sm:col-span-2">
                                               <BigButton
-                                                className="w-full disabled:opacity-60 disabled:cursor-not-allowed"
                                                 disabled={
-                                                  hasStock ||
                                                   !effectiveEditProductCategoryId ||
                                                   !effectiveEditProductTalla
                                                 }
@@ -2946,12 +3079,6 @@ export default function TiendaAdminPage() {
                                                 Cancelar
                                               </BigButton>
                                             </div>
-                                            {hasStock ? (
-                                              <div className="text-sm font-semibold text-slate-600 sm:col-span-2">
-                                                No se puede editar este producto
-                                                porque tiene stock.
-                                              </div>
-                                            ) : null}
                                           </div>
                                         )}
                                       </div>
@@ -2985,9 +3112,25 @@ export default function TiendaAdminPage() {
               title="Ajuste rápido"
               subtitle="Entradas/salidas por producto."
               actions={
-                isQuickAdjustOpen ? (
-                  <XButton onClick={closeAllCatalogForms} />
-                ) : null
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <SelectField
+                    label="Tienda"
+                    value={effectiveBranchId}
+                    disabled={dataSource !== "api"}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setSelectedBranchId(id);
+                      setStockProductCode("");
+                      setStockDelta("");
+                      closeInventoryAdjustRow();
+                    }}
+                    options={branchOptions}
+                    className="sm:min-w-[240px]"
+                  />
+                  {isQuickAdjustOpen ? (
+                    <XButton onClick={closeAllCatalogForms} />
+                  ) : null}
+                </div>
               }
             >
               {!isQuickAdjustOpen ? (

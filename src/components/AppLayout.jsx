@@ -5,8 +5,8 @@ const navItems = [
   { to: "/tienda-admin", label: "Tienda Admin" },
   { to: "/etiquetas", label: "Etiquetas" },
   { to: "/separadores", label: "Separadores" },
-  { to: "/pos-demo", label: "POS" },
   { to: "/inventario-demo", label: "Inventario" },
+  { to: "/pos-demo", label: "POS" },
 ];
 
 function NavItem({ to, label }) {

@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import BigButton from "../components/BigButton.jsx";
-import Field from "../components/Field.jsx";
 import SelectField from "../components/SelectField.jsx";
-import { apiGet, apiSend } from "../api.js";
+import { apiGet } from "../api.js";
 import { getCategoryById } from "../mocks/catalog.js";
 
 const STORAGE_KEY = "myrboutique:tienda-admin:v1";
@@ -84,12 +82,6 @@ export default function InventarioPage() {
       return persisted.stockByProductCode;
     return {};
   });
-
-  useEffect(() => {
-    if (dataSource === "api") return;
-    const current = readJson(STORAGE_KEY) || {};
-    writeJson(STORAGE_KEY, { ...current, stockByProductCode });
-  }, [dataSource, stockByProductCode]);
 
   const effectiveBranchId = useMemo(() => {
     const desired = String(selectedBranchId || "").trim();
@@ -190,21 +182,7 @@ export default function InventarioPage() {
       alive = false;
     };
   }, [dataSource, effectiveBranchId]);
-
-  const [selectedCategoryId, setSelectedCategoryId] = useState(
-    categories[0]?.id || "",
-  );
-  const [selectedProductCode, setSelectedProductCode] = useState("");
-  const [qty, setQty] = useState("1");
   const [openCategoryId, setOpenCategoryId] = useState("");
-
-  const effectiveSelectedCategoryId = useMemo(() => {
-    const first = categories[0]?.id || "";
-    if (!first) return "";
-    return categories.some((c) => c.id === selectedCategoryId)
-      ? selectedCategoryId
-      : first;
-  }, [categories, selectedCategoryId]);
 
   const productsWithDetails = useMemo(() => {
     return products
@@ -226,14 +204,6 @@ export default function InventarioPage() {
       })
       .sort((a, b) => String(a.code).localeCompare(String(b.code)));
   }, [products, categories, persistedProfiles, stockByProductCode]);
-
-  const productsForSelection = useMemo(() => {
-    return productsWithDetails.filter((p) =>
-      effectiveSelectedCategoryId
-        ? p.categoryId === effectiveSelectedCategoryId
-        : true,
-    );
-  }, [productsWithDetails, effectiveSelectedCategoryId]);
 
   const inventoryByCategory = useMemo(() => {
     const map = {};
@@ -281,53 +251,13 @@ export default function InventarioPage() {
     setOpenCategoryId((prev) => (prev === id ? "" : id));
   }
 
-  const effectiveSelectedProductCode = useMemo(() => {
-    const first = productsForSelection[0]?.code || "";
-    if (!first) return "";
-    return productsForSelection.some((p) => p.code === selectedProductCode)
-      ? selectedProductCode
-      : first;
-  }, [productsForSelection, selectedProductCode]);
-
-  async function adjustStock(delta) {
-    const n = Number(qty || 0);
-    if (!effectiveSelectedProductCode) return;
-    if (!Number.isFinite(n) || n <= 0) return;
-    const d = delta * n;
-    if (dataSource === "api") {
-      try {
-        const r = await apiSend("/api/inventory/adjust", "POST", {
-          branchId: effectiveBranchId,
-          code: effectiveSelectedProductCode,
-          delta: d,
-          reason: "inventario_demo_adjust",
-        });
-        const nextQty = Number(r?.qty ?? 0);
-        setStockByProductCode((prev) => ({
-          ...(prev || {}),
-          [effectiveSelectedProductCode]: nextQty,
-        }));
-      } catch (e) {
-        window.alert(String(e?.message || e));
-      }
-      return;
-    }
-    setStockByProductCode((prev) => {
-      const current = prev?.[effectiveSelectedProductCode] ?? 0;
-      return {
-        ...(prev || {}),
-        [effectiveSelectedProductCode]: Math.max(0, current + d),
-      };
-    });
-  }
-
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Inventario</h1>
           <div className="mt-1 text-sm font-semibold text-slate-600">
-            Ajuste rápido por producto (persistente en este dispositivo).
+            Inventario por categoría (solo lectura).
           </div>
         </div>
         <SelectField
@@ -345,134 +275,84 @@ export default function InventarioPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <section className="rounded-2xl bg-white p-5 ring-1 ring-slate-200 sm:p-6">
+      <section className="space-y-4">
+        <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200 sm:p-6">
           <div className="text-lg font-extrabold tracking-tight">
-            Ajuste rápido
+            Inventario por categoría
           </div>
-
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <SelectField
-              label="Categoría"
-              value={effectiveSelectedCategoryId}
-              onChange={(e) => setSelectedCategoryId(e.target.value)}
-              options={categories.map((c) => ({ value: c.id, label: c.name }))}
-            />
-            <SelectField
-              label="Producto"
-              value={effectiveSelectedProductCode}
-              onChange={(e) => setSelectedProductCode(e.target.value)}
-              options={productsForSelection.map((p) => ({
-                value: p.code,
-                label: `${p.talla ? `Talla ${p.talla}` : "—"}`,
-              }))}
-              className="sm:col-span-2"
-            />
-
-            <Field
-              label="Cantidad"
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
-              inputMode="numeric"
-              placeholder="Ej. 1"
-            />
-
-            <div className="grid grid-cols-2 gap-3 sm:col-span-2">
-              <BigButton className="w-full" onClick={() => adjustStock(+1)}>
-                Agregar +
-              </BigButton>
-              <BigButton
-                className="w-full"
-                variant="danger"
-                onClick={() => adjustStock(-1)}
-              >
-                Quitar -
-              </BigButton>
-            </div>
-          </div>
-        </section>
-
-        <section className="space-y-4">
-          <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200 sm:p-6">
-            <div className="text-lg font-extrabold tracking-tight">
-              Inventario por categoría
-            </div>
-            <div className="mt-4 overflow-hidden rounded-2xl ring-1 ring-slate-200">
-              <div className="divide-y divide-slate-200 bg-white">
-                {inventoryByCategory.map((g) => {
-                  const isOpen = openCategoryId === g.categoryId;
-                  return (
-                    <div key={g.categoryId}>
-                      <button
-                        type="button"
-                        onClick={() => toggleCategory(g.categoryId)}
-                        className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-base font-extrabold">
-                            {g.categoryName}
-                          </div>
-                          <div className="mt-1 text-sm font-semibold text-slate-600">
-                            {g.items.length} tallas · Total:{" "}
-                            <span className="font-extrabold tabular-nums">
-                              {g.totalStock}
-                            </span>
-                          </div>
+          <div className="mt-4 overflow-hidden rounded-2xl ring-1 ring-slate-200">
+            <div className="divide-y divide-slate-200 bg-white">
+              {inventoryByCategory.map((g) => {
+                const isOpen = openCategoryId === g.categoryId;
+                return (
+                  <div key={g.categoryId}>
+                    <button
+                      type="button"
+                      onClick={() => toggleCategory(g.categoryId)}
+                      className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-base font-extrabold">
+                          {g.categoryName}
                         </div>
-                        <div className="shrink-0 text-sm font-extrabold text-slate-700">
-                          {isOpen ? "—" : "+"}
+                        <div className="mt-1 text-sm font-semibold text-slate-600">
+                          {g.items.length} tallas · Total:{" "}
+                          <span className="font-extrabold tabular-nums">
+                            {g.totalStock}
+                          </span>
                         </div>
-                      </button>
+                      </div>
+                      <div className="shrink-0 text-sm font-extrabold text-slate-700">
+                        {isOpen ? "—" : "+"}
+                      </div>
+                    </button>
 
-                      {isOpen ? (
-                        <div className="border-t border-slate-200 bg-slate-50">
-                          <div className="grid grid-cols-12 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-slate-600">
-                            <div className="col-span-2">Talla</div>
-                            <div className="col-span-4">Producto</div>
-                            <div className="col-span-3">Género</div>
-                            <div className="col-span-2 text-right">Precio</div>
-                            <div className="col-span-1 text-right">Stock</div>
-                          </div>
-                          <div className="divide-y divide-slate-200">
-                            {g.items.map((p) => (
-                              <div
-                                key={p.code}
-                                className="grid grid-cols-12 px-4 py-3 text-sm font-semibold text-slate-900"
-                              >
-                                <div className="col-span-2">
-                                  {p.talla || "—"}
-                                </div>
-                                <div className="col-span-4 tabular-nums">
-                                  {p.code}
-                                </div>
-                                <div className="col-span-3 text-slate-700">
-                                  {p.genero || "—"}
-                                </div>
-                                <div className="col-span-2 text-right tabular-nums text-slate-700">
-                                  ${p.price}
-                                </div>
-                                <div className="col-span-1 text-right tabular-nums">
-                                  {p.stock}
-                                </div>
+                    {isOpen ? (
+                      <div className="border-t border-slate-200 bg-slate-50">
+                        <div className="grid grid-cols-12 px-4 py-2 text-xs font-extrabold uppercase tracking-wide text-slate-600">
+                          <div className="col-span-2">Talla</div>
+                          <div className="col-span-4">Producto</div>
+                          <div className="col-span-3">Género</div>
+                          <div className="col-span-2 text-right">Precio</div>
+                          <div className="col-span-1 text-right">Stock</div>
+                        </div>
+                        <div className="divide-y divide-slate-200">
+                          {g.items.map((p) => (
+                            <div
+                              key={p.code}
+                              className="grid grid-cols-12 px-4 py-3 text-sm font-semibold text-slate-900"
+                            >
+                              <div className="col-span-2">{p.talla || "—"}</div>
+                              <div className="col-span-4 tabular-nums">
+                                {p.code}
                               </div>
-                            ))}
-                          </div>
+                              <div className="col-span-3 text-slate-700">
+                                {p.genero || "—"}
+                              </div>
+                              <div className="col-span-2 text-right tabular-nums text-slate-700">
+                                ${p.price}
+                              </div>
+                              <div className="col-span-1 text-right tabular-nums">
+                                {p.stock}
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-
-                {!inventoryByCategory.length ? (
-                  <div className="px-4 py-4 text-sm font-semibold text-slate-600">
-                    Sin productos
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
+                );
+              })}
+
+              {!inventoryByCategory.length ? (
+                <div className="px-4 py-4 text-sm font-semibold text-slate-600">
+                  Sin productos
+                </div>
+              ) : null}
             </div>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
     </div>
   );
 }

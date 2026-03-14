@@ -11,6 +11,13 @@ import {
 const STORAGE_KEY = "myrboutique:tienda-admin:v1";
 const POS_STORAGE_KEY = "myrboutique:pos-demo:v1";
 const WHOLESALE_MIN_QTY = 15;
+const DISCOUNT_PRESETS = [5, 10, 15, 20, 25];
+
+function roundMoney(value) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
 
 function readJson(key) {
   try {
@@ -80,6 +87,12 @@ export default function PosPage() {
     if (raw === "mayoreo") return "mayoreo";
     return null;
   });
+  const [discountChoice, setDiscountChoice] = useState(() => {
+    const raw = String(persistedPos?.discountChoice || "").trim();
+    const n = Number(raw);
+    if (Number.isFinite(n) && DISCOUNT_PRESETS.includes(n)) return String(n);
+    return "";
+  });
   const [categories, setCategories] = useState(() => {
     const base =
       Array.isArray(persisted?.categories) && persisted.categories.length
@@ -122,8 +135,12 @@ export default function PosPage() {
   const [lastPayment, setLastPayment] = useState(null);
 
   useEffect(() => {
-    writeJson(POS_STORAGE_KEY, { ticket, saleType });
-  }, [ticket, saleType]);
+    writeJson(POS_STORAGE_KEY, {
+      ticket,
+      saleType,
+      discountChoice,
+    });
+  }, [ticket, saleType, discountChoice]);
 
   useEffect(() => {
     let alive = true;
@@ -249,10 +266,23 @@ export default function PosPage() {
     return Math.max(0, normalTotal - wholesaleTotal);
   }, [saleType, wholesaleApplied, normalTotal, wholesaleTotal]);
 
-  const total = useMemo(
+  const discountPercent = useMemo(() => {
+    const n = Number(discountChoice);
+    if (!Number.isFinite(n)) return 0;
+    return n;
+  }, [discountChoice]);
+
+  const subtotal = useMemo(
     () => ticketWithPrices.reduce((sum, i) => sum + i.lineTotal, 0),
     [ticketWithPrices],
   );
+  const percentDiscountAmount = useMemo(() => {
+    if (!discountPercent) return 0;
+    return roundMoney((subtotal * discountPercent) / 100);
+  }, [discountPercent, subtotal]);
+  const total = useMemo(() => {
+    return roundMoney(Math.max(0, subtotal - percentDiscountAmount));
+  }, [subtotal, percentDiscountAmount]);
   const itemsCount = useMemo(
     () => ticketWithPrices.reduce((sum, i) => sum + i.qty, 0),
     [ticketWithPrices],
@@ -483,6 +513,37 @@ export default function PosPage() {
                 </BigButton>
               </div>
 
+              <div className="mt-4 grid grid-cols-1 gap-3">
+                <div>
+                  <div className="text-sm font-extrabold text-slate-700">
+                    Descuento
+                  </div>
+                  <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-8">
+                    {DISCOUNT_PRESETS.map((n) => {
+                      const v = String(n);
+                      const isSelected = discountChoice === v;
+                      return (
+                        <button
+                          key={v}
+                          type="button"
+                          onClick={() =>
+                            setDiscountChoice((prev) => (prev === v ? "" : v))
+                          }
+                          className={
+                            "h-12 rounded-2xl px-3 text-base font-extrabold ring-1 focus:outline-none focus:ring-2 focus:ring-slate-900" +
+                            (isSelected
+                              ? " bg-slate-900 text-white ring-slate-900"
+                              : " bg-white text-slate-900 ring-slate-200")
+                          }
+                        >
+                          {n}%
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
               <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
                 <div className="text-sm font-extrabold text-slate-700">
                   Total
@@ -490,6 +551,14 @@ export default function PosPage() {
                 <div className="mt-1 text-3xl font-extrabold tabular-nums">
                   ${total}
                 </div>
+                {discountPercent ? (
+                  <div className="mt-2 text-sm font-semibold text-slate-700">
+                    Descuento aplicado: {discountPercent}% · -$
+                    <span className="font-extrabold tabular-nums">
+                      {percentDiscountAmount}
+                    </span>
+                  </div>
+                ) : null}
                 {wholesaleApplied ? (
                   <div className="mt-2 text-sm font-semibold text-emerald-700">
                     Descuento mayoreo aplicado: -$
@@ -499,7 +568,7 @@ export default function PosPage() {
                   </div>
                 ) : null}
                 <div className="mt-1 text-sm font-semibold text-slate-600">
-                  Items:{" "}
+                  Artículos:{" "}
                   <span className="font-extrabold tabular-nums">
                     {itemsCount}
                   </span>
