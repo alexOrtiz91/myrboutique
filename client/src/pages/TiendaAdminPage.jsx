@@ -46,6 +46,12 @@ function writeJson(key, value) {
   }
 }
 
+function roundMoney(value) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
 function toCategoryId(name) {
   return String(name || "")
     .trim()
@@ -959,10 +965,17 @@ export default function TiendaAdminPage() {
           categoryName: String(p?.categoryName || "").trim() || categoryId,
           items: [],
           totalStock: 0,
+          totalPotential: 0,
         };
       }
       map[categoryId].items.push(p);
-      map[categoryId].totalStock += Number(p?.stock ?? 0) || 0;
+      const rawStock = Number(p?.stock ?? 0);
+      const stock = Number.isFinite(rawStock) && rawStock >= 0 ? rawStock : 0;
+      map[categoryId].totalStock += stock;
+
+      const rawPrice = Number(p?.price ?? 0);
+      const price = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : 0;
+      map[categoryId].totalPotential += price * stock;
     }
 
     return Object.values(map);
@@ -995,6 +1008,19 @@ export default function TiendaAdminPage() {
       ),
     );
   }, [inventoryByCategory, inventorySearchText]);
+
+  const inventorySummary = useMemo(() => {
+    let totalStock = 0;
+    let totalPotential = 0;
+    for (const g of inventoryByCategoryFiltered || []) {
+      const stock = Number(g?.totalStock ?? 0);
+      if (Number.isFinite(stock) && stock > 0) totalStock += stock;
+
+      const potential = Number(g?.totalPotential ?? 0);
+      if (Number.isFinite(potential) && potential > 0) totalPotential += potential;
+    }
+    return { totalStock, totalPotential: roundMoney(totalPotential) };
+  }, [inventoryByCategoryFiltered]);
 
   const productHasStock = useMemo(() => {
     const out = {};
@@ -3221,6 +3247,17 @@ export default function TiendaAdminPage() {
               </BigButton>
             </div>
 
+            <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+              Total piezas:{" "}
+              <span className="font-extrabold tabular-nums">
+                {inventorySummary.totalStock}
+              </span>{" "}
+              · Potencial ingreso (precio normal):{" "}
+              <span className="font-extrabold tabular-nums">
+                ${inventorySummary.totalPotential}
+              </span>
+            </div>
+
             <div className="mt-4 overflow-x-auto rounded-2xl ring-1 ring-slate-200">
               <div className="w-full">
                 <div className="divide-y divide-slate-200 bg-white">
@@ -3241,6 +3278,11 @@ export default function TiendaAdminPage() {
                               {g.items.length} tallas · Total:{" "}
                               <span className="font-extrabold tabular-nums">
                                 {g.totalStock}
+                              </span>
+                              {" "}
+                              · Potencial:{" "}
+                              <span className="font-extrabold tabular-nums">
+                                ${roundMoney(g.totalPotential)}
                               </span>
                             </div>
                           </div>
