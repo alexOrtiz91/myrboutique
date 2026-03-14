@@ -47,9 +47,16 @@ function guessProfileIdFromCategory(category, profiles) {
   return getDefaultProfileId(profiles);
 }
 
-export default function InventarioDemoPage() {
+export default function InventarioPage() {
   const [persisted] = useState(() => readJson(STORAGE_KEY));
   const [dataSource, setDataSource] = useState("local");
+
+  const [branches, setBranches] = useState(() => {
+    return Array.isArray(persisted?.branches) ? persisted.branches : [];
+  });
+  const [selectedBranchId, setSelectedBranchId] = useState(() => {
+    return String(persisted?.branchId || "").trim();
+  });
 
   const persistedProfiles = useMemo(() => {
     return Array.isArray(persisted?.sizeProfiles) ? persisted.sizeProfiles : [];
@@ -84,15 +91,59 @@ export default function InventarioDemoPage() {
     writeJson(STORAGE_KEY, { ...current, stockByProductCode });
   }, [dataSource, stockByProductCode]);
 
+  const effectiveBranchId = useMemo(() => {
+    const desired = String(selectedBranchId || "").trim();
+    const normalizedBranches = Array.isArray(branches) ? branches : [];
+    if (normalizedBranches.length) {
+      const hit = normalizedBranches.find(
+        (b) => String(b?.id || "").trim() === desired,
+      );
+      if (hit) return String(hit.id || "").trim();
+      return String(normalizedBranches[0]?.id || "").trim();
+    }
+    return desired;
+  }, [branches, selectedBranchId]);
+
+  const branchOptions = useMemo(() => {
+    const normalizedBranches = Array.isArray(branches) ? branches : [];
+    if (!normalizedBranches.length) return [];
+    return normalizedBranches.map((b) => ({
+      value: String(b?.id || "").trim(),
+      label: String(b?.name || "").trim(),
+    }));
+  }, [branches]);
+
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         await apiGet("/api/db/health");
+
+        let apiBranches = [];
+        try {
+          const branchesRes = await apiGet("/api/branches");
+          apiBranches = Array.isArray(branchesRes?.branches)
+            ? branchesRes.branches
+            : [];
+        } catch (e) {
+          void e;
+        }
+        if (alive) setBranches(apiBranches);
+        const persistedBranchId = String(persisted?.branchId || "").trim();
+        const defaultBranchId = apiBranches.some(
+          (b) => String(b?.id || "").trim() === persistedBranchId,
+        )
+          ? persistedBranchId
+          : String(apiBranches[0]?.id || "").trim();
+        if (alive) setSelectedBranchId(defaultBranchId);
+
+        const stockUrl = defaultBranchId
+          ? `/api/inventory/stock?branchId=${encodeURIComponent(defaultBranchId)}`
+          : "/api/inventory/stock";
         const [catRes, prodRes, stockRes] = await Promise.all([
           apiGet("/api/catalog/categories"),
           apiGet("/api/catalog/products"),
-          apiGet("/api/inventory/stock"),
+          apiGet(stockUrl),
         ]);
         if (!alive) return;
 
@@ -113,7 +164,32 @@ export default function InventarioDemoPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [persisted]);
+
+  useEffect(() => {
+    if (dataSource !== "api") return;
+    if (!effectiveBranchId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await apiGet(
+          `/api/inventory/stock?branchId=${encodeURIComponent(effectiveBranchId)}`,
+        );
+        if (!alive) return;
+        const next =
+          r?.stockByProductCode && !Array.isArray(r.stockByProductCode)
+            ? r.stockByProductCode
+            : {};
+        setStockByProductCode(next);
+      } catch (e) {
+        if (!alive) return;
+        void e;
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [dataSource, effectiveBranchId]);
 
   const [selectedCategoryId, setSelectedCategoryId] = useState(
     categories[0]?.id || "",
@@ -221,6 +297,7 @@ export default function InventarioDemoPage() {
     if (dataSource === "api") {
       try {
         const r = await apiSend("/api/inventory/adjust", "POST", {
+          branchId: effectiveBranchId,
           code: effectiveSelectedProductCode,
           delta: d,
           reason: "inventario_demo_adjust",
@@ -246,13 +323,26 @@ export default function InventarioDemoPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-extrabold tracking-tight">
-          Inventario Demo
-        </h1>
-        <div className="mt-1 text-sm font-semibold text-slate-600">
-          Ajuste rápido por producto (persistente en este dispositivo).
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-extrabold tracking-tight">Inventario</h1>
+          <div className="mt-1 text-sm font-semibold text-slate-600">
+            Ajuste rápido por producto (persistente en este dispositivo).
+          </div>
         </div>
+        <SelectField
+          label="Tienda"
+          value={effectiveBranchId}
+          disabled={dataSource !== "api"}
+          onChange={(e) => {
+            const id = e.target.value;
+            setSelectedBranchId(id);
+            const current = readJson(STORAGE_KEY) || {};
+            writeJson(STORAGE_KEY, { ...current, branchId: id });
+          }}
+          options={branchOptions}
+          className="sm:min-w-[240px]"
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -289,14 +379,14 @@ export default function InventarioDemoPage() {
 
             <div className="grid grid-cols-2 gap-3 sm:col-span-2">
               <BigButton className="w-full" onClick={() => adjustStock(+1)}>
-                + Agregar
+                Agregar +
               </BigButton>
               <BigButton
                 className="w-full"
                 variant="danger"
                 onClick={() => adjustStock(-1)}
               >
-                - Quitar
+                Quitar -
               </BigButton>
             </div>
           </div>

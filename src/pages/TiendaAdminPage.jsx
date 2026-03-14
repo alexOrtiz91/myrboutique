@@ -100,10 +100,10 @@ function summarizeTallasByProfile(category, profiles) {
   const profileId = guessProfileIdFromCategory(category, profiles);
   const profile = getProfileById(profiles, profileId);
   if (!profile) return "—";
-  const t = getProfileTallas(profile);
-  if (!t.length) return "—";
-  const genero = profile?.genero ? `${profile.genero} · ` : "";
-  return `${genero}${t.slice(0, 8).join(", ")}${t.length > 8 ? "…" : ""}`;
+  const label = String(profile?.label || "").trim();
+  if (!label) return "—";
+  const genero = profile?.genero ? ` · ${profile.genero}` : "";
+  return `${label}${genero}`;
 }
 
 function Panel({ title, subtitle, actions = null, className = "", children }) {
@@ -1223,6 +1223,81 @@ export default function TiendaAdminPage() {
     setNewProductCategoryId(id);
   }
 
+  async function duplicateCategory(category) {
+    const c = category || null;
+    if (!c) return;
+    const sourceName = String(c.name || "").trim();
+    if (!sourceName) return;
+
+    const normalizeKey = (v) =>
+      String(v || "")
+        .trim()
+        .toLowerCase();
+    const existingKeys = new Set(
+      categories.map((it) => normalizeKey(it?.name)),
+    );
+    const baseName = sourceName
+      .replace(/\s*\(copia(?:\s+\d+)?\)\s*$/i, "")
+      .trim();
+    let nextName = `${baseName || sourceName} (copia)`;
+    if (existingKeys.has(normalizeKey(nextName))) {
+      for (let i = 2; i <= 99; i += 1) {
+        const candidate = `${baseName || sourceName} (copia ${i})`;
+        if (!existingKeys.has(normalizeKey(candidate))) {
+          nextName = candidate;
+          break;
+        }
+      }
+    }
+
+    const baseId = toCategoryId(nextName);
+    const id = nextAvailableCategoryId(baseId, categories);
+    const price = Number(c.price ?? 0);
+    const creditPrice = Number(c.creditPrice ?? c.price ?? 0);
+    const wholesalePrice = Number(c.wholesalePrice ?? c.price ?? 0);
+    const profileId = guessProfileIdFromCategory(c, sizeProfiles);
+    const profile = sizeProfiles.find((p) => p.id === profileId) || null;
+
+    if (!baseId || !id || !nextName) return;
+    if (!Number.isFinite(price) || price < 0) return;
+    if (!Number.isFinite(creditPrice) || creditPrice < 0) return;
+    if (!profile) {
+      window.alert("Selecciona un perfil de tallas");
+      return;
+    }
+
+    const safeCreditPrice =
+      Number.isFinite(creditPrice) && creditPrice >= 0 ? creditPrice : price;
+    const safeWholesalePrice =
+      Number.isFinite(wholesalePrice) && wholesalePrice >= 0
+        ? wholesalePrice
+        : price;
+
+    const nextCategory = {
+      id,
+      name: nextName,
+      price,
+      creditPrice: safeCreditPrice,
+      wholesalePrice: safeWholesalePrice,
+      sizeProfileId: profile.id,
+    };
+
+    closeAllCatalogForms();
+    if (dataSource === "api") {
+      try {
+        await apiSend("/api/catalog/categories", "POST", nextCategory);
+        await refreshCategoriesFromApi(profile.id);
+      } catch (e) {
+        window.alert(String(e?.message || e));
+        return;
+      }
+    } else {
+      setCategories((prev) => [...prev, nextCategory]);
+    }
+    setSelectedCatalogCategoryId(id);
+    setNewProductCategoryId(id);
+  }
+
   async function addProduct() {
     if (!effectiveNewProductCategoryId) return;
     if (!effectiveNewProductTalla) {
@@ -2027,8 +2102,6 @@ export default function TiendaAdminPage() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-2xl font-extrabold tracking-tight">Tienda Admin</h1>
-
       <div className="flex flex-wrap gap-3 print:hidden">
         <TabButton
           active={tab === "catalogos"}
@@ -2172,7 +2245,17 @@ export default function TiendaAdminPage() {
                           </div>
 
                           {isSelected ? (
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-3 gap-2">
+                              <BigButton
+                                className="w-full"
+                                variant="secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  duplicateCategory(c);
+                                }}
+                              >
+                                Duplicar
+                              </BigButton>
                               <BigButton
                                 className="w-full"
                                 variant="secondary"
@@ -2950,14 +3033,14 @@ export default function TiendaAdminPage() {
                       className="w-full"
                       onClick={() => adjustStock(+1)}
                     >
-                      + Agregar
+                      Agregar +
                     </BigButton>
                     <BigButton
                       className="w-full"
                       variant="danger"
                       onClick={() => adjustStock(-1)}
                     >
-                      - Quitar
+                      Quitar -
                     </BigButton>
                   </div>
                 </div>

@@ -70,7 +70,7 @@ function TicketRow({ item, onDec, onInc }) {
   );
 }
 
-export default function PosDemoPage() {
+export default function PosPage() {
   const [persisted] = useState(() => readJson(STORAGE_KEY));
   const [persistedPos] = useState(() => readJson(POS_STORAGE_KEY));
   const [saleType, setSaleType] = useState(() => {
@@ -362,7 +362,7 @@ export default function PosDemoPage() {
     <div className="space-y-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">POS Demo</h1>
+          <h1 className="text-2xl font-extrabold tracking-tight">POS</h1>
           <div className="mt-1 text-sm font-semibold text-slate-600">
             {saleType
               ? "Escanea un código (ej. 1001 + Enter). El escáner se comporta como teclado."
@@ -464,9 +464,7 @@ export default function PosDemoPage() {
           </section>
 
           <section className="space-y-3">
-            <div className="text-lg font-extrabold tracking-tight">
-              Cobro (demo)
-            </div>
+            <div className="text-lg font-extrabold tracking-tight">Cobro</div>
             <div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200">
               <div className="grid grid-cols-1 gap-3">
                 <BigButton
