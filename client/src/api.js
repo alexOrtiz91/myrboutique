@@ -1,9 +1,24 @@
+function joinUrl(base, path) {
+  const b = String(base || "");
+  const p = String(path || "");
+  if (!b) return p;
+  if (!p) return b;
+  if (b === "/api" && p.startsWith("/api")) return p;
+  if (b.endsWith("/") && p.startsWith("/")) return `${b.slice(0, -1)}${p}`;
+  return `${b}${p}`;
+}
+
 export function getApiBaseUrl() {
   const raw = (import.meta.env && import.meta.env.VITE_API_BASE_URL) || "";
   const trimmed = String(raw || "").trim();
-  if (trimmed) return trimmed;
+  if (trimmed) {
+    if (trimmed === "/api") return "";
+    return trimmed;
+  }
   try {
     const loc = globalThis.location;
+    const protocol = String(loc?.protocol || "").trim();
+    if (protocol === "https:") return "";
     const hostname = String(loc?.hostname || "").trim();
     if (hostname) return `http://${hostname}:3001`;
   } catch (e) {
@@ -21,7 +36,7 @@ async function parseJsonSafe(response) {
 }
 
 export async function apiGet(path) {
-  const url = `${getApiBaseUrl()}${path}`;
+  const url = joinUrl(getApiBaseUrl(), path);
   const res = await fetch(url, { method: "GET" });
   const body = await parseJsonSafe(res);
   if (!res.ok) {
@@ -36,7 +51,7 @@ export async function apiGet(path) {
 }
 
 export async function apiSend(path, method, data) {
-  const url = `${getApiBaseUrl()}${path}`;
+  const url = joinUrl(getApiBaseUrl(), path);
   const res = await fetch(url, {
     method,
     headers: { "Content-Type": "application/json" },
