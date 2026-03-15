@@ -1269,6 +1269,556 @@ app.delete("/api/catalog/products/:code", async (req, res) => {
   }
 });
 
+app.get("/api/sales", async (req, res) => {
+  const client = pool ? await pool.connect() : null;
+  try {
+    if (!client) throw new Error("DATABASE_URL is not set");
+    const branchId = await getBranchIdForRequest(client, req);
+    if (!branchId) throw new Error("branch_not_found");
+
+    const limitRaw = Number(req.query?.limit ?? 50);
+    const limit = Math.min(
+      200,
+      Math.max(1, Math.floor(Number.isFinite(limitRaw) ? limitRaw : 50)),
+    );
+
+    const { rows } = await client.query(
+      `
+        SELECT
+          s.id,
+          s.receipt_number,
+          s.subtotal_cents,
+          s.total_cents,
+          s.payment_method,
+          s.canceled_at,
+          s.created_at,
+          COALESCE(SUM(si.qty), 0) AS items_count
+        FROM sales s
+        LEFT JOIN sale_items si ON si.sale_id = s.id
+        WHERE s.branch_id = $1
+        GROUP BY
+          s.id,
+          s.receipt_number,
+          s.subtotal_cents,
+          s.total_cents,
+          s.payment_method,
+          s.canceled_at,
+          s.created_at
+        ORDER BY s.created_at DESC
+        LIMIT $2
+      `,
+      [branchId, limit],
+    );
+
+    res.json({
+      sales: rows.map((r) => ({
+        id: String(r.id || "").trim(),
+        receiptNumber: String(r.receipt_number || "").trim(),
+        subtotal: fromCents(r.subtotal_cents),
+        total: fromCents(r.total_cents),
+        paymentMethod: String(r.payment_method || "").trim(),
+        canceledAt: r.canceled_at || null,
+        createdAt: r.created_at,
+        itemsCount: Number(r.items_count ?? 0),
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+app.get("/api/sales/:id", async (req, res) => {
+  const client = pool ? await pool.connect() : null;
+  try {
+    if (!client) throw new Error("DATABASE_URL is not set");
+    const id = String(req.params?.id || "").trim();
+    if (!id) return res.status(400).json({ error: "invalid_id" });
+
+    const branchId = await getBranchIdForRequest(client, req);
+    if (!branchId) throw new Error("branch_not_found");
+
+    const saleRes = await client.query(
+      `
+        SELECT
+          id,
+          receipt_number,
+          subtotal_cents,
+          total_cents,
+          payment_method,
+          canceled_at,
+          canceled_reason,
+          created_at
+        FROM sales
+        WHERE id = $1
+          AND branch_id = $2
+        LIMIT 1
+      `,
+      [id, branchId],
+    );
+    const sale = saleRes.rows?.[0] || null;
+    if (!sale) return res.status(404).json({ error: "not_found" });
+
+    const itemsRes = await client.query(
+      `
+        SELECT
+          pv.code AS code,
+          c.name AS category_name,
+          pv.talla AS talla,
+          si.qty,
+          si.unit_price_cents,
+          si.line_total_cents
+        FROM sale_items si
+        JOIN product_variants pv ON pv.id = si.product_variant_id
+        JOIN categories c ON c.id = si.category_id
+        WHERE si.sale_id = $1
+        ORDER BY c.name ASC, pv.talla ASC, pv.code ASC
+      `,
+      [id],
+    );
+
+    res.json({
+      sale: {
+        id: String(sale.id || "").trim(),
+        receiptNumber: String(sale.receipt_number || "").trim(),
+        subtotal: fromCents(sale.subtotal_cents),
+        total: fromCents(sale.total_cents),
+        paymentMethod: String(sale.payment_method || "").trim(),
+        canceledAt: sale.canceled_at || null,
+        canceledReason: String(sale.canceled_reason || "").trim(),
+        createdAt: sale.created_at,
+      },
+      items: itemsRes.rows.map((r) => ({
+        code: String(r.code || "").trim(),
+        categoryName: String(r.category_name || "").trim(),
+        talla: String(r.talla || "").trim(),
+        qty: Number(r.qty ?? 0),
+        unitPrice: fromCents(r.unit_price_cents),
+        lineTotal: fromCents(r.line_total_cents),
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+app.post("/api/sales/:id/cancel", async (req, res) => {
+  const client = pool ? await pool.connect() : null;
+  try {
+    if (!client) throw new Error("DATABASE_URL is not set");
+    const id = String(req.params?.id || "").trim();
+    if (!id) return res.status(400).json({ error: "invalid_id" });
+
+    const branchId = await getBranchIdForRequest(client, req);
+    if (!branchId) throw new Error("branch_not_found");
+
+    const canceledReason = String(req.body?.reason || "").trim() || null;
+
+    await client.query("BEGIN");
+    const saleRes = await client.query(
+      `
+        SELECT id, canceled_at
+        FROM sales
+        WHERE id = $1
+          AND branch_id = $2
+        FOR UPDATE
+      `,
+      [id, branchId],
+    );
+    const sale = saleRes.rows?.[0] || null;
+    if (!sale) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "not_found" });
+    }
+    if (sale.canceled_at) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "already_canceled" });
+    }
+
+    const itemsRes = await client.query(
+      `
+        SELECT product_variant_id, qty
+        FROM sale_items
+        WHERE sale_id = $1
+      `,
+      [id],
+    );
+    const items = Array.isArray(itemsRes.rows) ? itemsRes.rows : [];
+    const variantIds = items
+      .map((r) => String(r.product_variant_id || "").trim())
+      .filter(Boolean);
+
+    if (variantIds.length) {
+      const ensureArgs = [branchId, ...variantIds];
+      const ensureValues = variantIds
+        .map((_, i) => `($1, $${i + 2}, 0)`)
+        .join(", ");
+      await client.query(
+        `
+          INSERT INTO inventory_counts (branch_id, product_variant_id, qty)
+          VALUES ${ensureValues}
+          ON CONFLICT (branch_id, product_variant_id) DO NOTHING
+        `,
+        ensureArgs,
+      );
+
+      await client.query(
+        `
+          SELECT product_variant_id, qty
+          FROM inventory_counts
+          WHERE branch_id = $1
+            AND product_variant_id = ANY($2::uuid[])
+          FOR UPDATE
+        `,
+        [branchId, variantIds],
+      );
+
+      for (const it of items) {
+        const productVariantId = String(it.product_variant_id || "").trim();
+        const qty = Math.floor(Number(it.qty ?? 0));
+        if (!productVariantId || !Number.isFinite(qty) || qty <= 0) continue;
+
+        await client.query(
+          `
+            UPDATE inventory_counts
+            SET qty = qty + $3,
+                updated_at = now()
+            WHERE branch_id = $1 AND product_variant_id = $2
+          `,
+          [branchId, productVariantId, qty],
+        );
+
+        await client.query(
+          `
+            INSERT INTO stock_movements (branch_id, product_variant_id, delta, reason, ref)
+            VALUES ($1, $2, $3, $4, $5)
+          `,
+          [branchId, productVariantId, qty, "sale_cancel", id],
+        );
+      }
+    }
+
+    await client.query(
+      `
+        UPDATE sales
+        SET canceled_at = now(),
+            canceled_reason = $3
+        WHERE id = $1 AND branch_id = $2
+      `,
+      [id, branchId, canceledReason],
+    );
+
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    try {
+      if (client) await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      void rollbackError;
+    }
+    res.status(500).json({ error: String(e?.message || e) });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+app.post("/api/sales", async (req, res) => {
+  const client = pool ? await pool.connect() : null;
+  try {
+    if (!client) throw new Error("DATABASE_URL is not set");
+
+    const paymentMethod = String(req.body?.paymentMethod || "").trim();
+    const terminalId = String(req.body?.terminalId || "").trim() || null;
+    const discountPercentRaw = Number(req.body?.discountPercent ?? 0);
+    const discountPercent = Number.isFinite(discountPercentRaw)
+      ? Math.min(100, Math.max(0, discountPercentRaw))
+      : 0;
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+
+    if (!paymentMethod)
+      return res.status(400).json({ error: "invalid_payload" });
+    if (!items.length) return res.status(400).json({ error: "empty_ticket" });
+
+    const normalizedItems = [];
+    for (const it of items) {
+      const code = String(it?.code || "").trim();
+      const qty = Math.floor(Number(it?.qty ?? 0));
+      const unitPrice = Number(it?.unitPrice ?? 0);
+      if (!code) return res.status(400).json({ error: "invalid_payload" });
+      if (!Number.isFinite(qty) || qty <= 0)
+        return res.status(400).json({ error: "invalid_payload" });
+      if (!Number.isFinite(unitPrice) || unitPrice < 0)
+        return res.status(400).json({ error: "invalid_payload" });
+      normalizedItems.push({ code, qty, unitPrice });
+    }
+
+    const branchId = await getBranchIdForRequest(client, req);
+    if (!branchId) throw new Error("branch_not_found");
+
+    const codes = Array.from(new Set(normalizedItems.map((i) => i.code)));
+    const variantsRes = await client.query(
+      `
+        SELECT id, code, category_id
+        FROM product_variants
+        WHERE active = TRUE
+          AND code = ANY($1::text[])
+      `,
+      [codes],
+    );
+
+    const byCode = new Map();
+    for (const r of variantsRes.rows)
+      byCode.set(String(r.code || "").trim(), {
+        id: r.id,
+        categoryId: String(r.category_id || "").trim(),
+      });
+
+    const missing = codes.filter((c) => !byCode.has(c));
+    if (missing.length)
+      return res
+        .status(404)
+        .json({ error: "product_not_found", codes: missing });
+
+    await client.query("BEGIN");
+
+    const variantIds = codes.map((c) => byCode.get(c).id);
+    const ensureArgs = [branchId, ...variantIds];
+    const ensureValues = variantIds
+      .map((_, i) => `($1, $${i + 2}, 0)`)
+      .join(", ");
+    await client.query(
+      `
+        INSERT INTO inventory_counts (branch_id, product_variant_id, qty)
+        VALUES ${ensureValues}
+        ON CONFLICT (branch_id, product_variant_id) DO NOTHING
+      `,
+      ensureArgs,
+    );
+
+    const stockRes = await client.query(
+      `
+        SELECT product_variant_id, qty
+        FROM inventory_counts
+        WHERE branch_id = $1
+          AND product_variant_id = ANY($2::uuid[])
+        FOR UPDATE
+      `,
+      [branchId, variantIds],
+    );
+    const stockByVariantId = new Map();
+    for (const r of stockRes.rows)
+      stockByVariantId.set(String(r.product_variant_id), Number(r.qty ?? 0));
+
+    const insufficient = [];
+    for (const it of normalizedItems) {
+      const pvId = byCode.get(it.code).id;
+      const available = stockByVariantId.get(String(pvId)) ?? 0;
+      if (available < it.qty)
+        insufficient.push({ code: it.code, available, requested: it.qty });
+    }
+    if (insufficient.length) {
+      await client.query("ROLLBACK");
+      return res
+        .status(409)
+        .json({ error: "insufficient_stock", items: insufficient });
+    }
+
+    let subtotalCents = 0;
+    const itemRows = normalizedItems.map((it) => {
+      const unitPriceCents = toCents(it.unitPrice);
+      const lineTotalCents = unitPriceCents * it.qty;
+      subtotalCents += lineTotalCents;
+      const pv = byCode.get(it.code);
+      return {
+        code: it.code,
+        productVariantId: pv.id,
+        categoryId: pv.categoryId,
+        unitPriceCents,
+        qty: it.qty,
+        lineTotalCents,
+      };
+    });
+
+    const totalCents = Math.max(
+      0,
+      Math.round((subtotalCents * (100 - discountPercent)) / 100),
+    );
+
+    const receiptRes = await client.query(
+      `
+        SELECT
+          (
+            COALESCE(
+              MAX(CASE WHEN receipt_number ~ '^[0-9]+$' THEN receipt_number::BIGINT END),
+              0
+            ) + 1
+          ) AS next
+        FROM sales
+        WHERE branch_id = $1
+      `,
+      [branchId],
+    );
+    const receiptNumber = String(receiptRes.rows?.[0]?.next ?? "").trim();
+
+    const saleRes = await client.query(
+      `
+        INSERT INTO sales (branch_id, terminal_id, receipt_number, subtotal_cents, total_cents, payment_method)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, receipt_number, subtotal_cents, total_cents, payment_method, created_at
+      `,
+      [
+        branchId,
+        terminalId,
+        receiptNumber,
+        subtotalCents,
+        totalCents,
+        paymentMethod,
+      ],
+    );
+    const sale = saleRes.rows?.[0] || null;
+    if (!sale) throw new Error("sale_insert_failed");
+
+    for (const it of itemRows) {
+      await client.query(
+        `
+          INSERT INTO sale_items (sale_id, product_variant_id, category_id, unit_price_cents, qty, line_total_cents)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `,
+        [
+          sale.id,
+          it.productVariantId,
+          it.categoryId,
+          it.unitPriceCents,
+          it.qty,
+          it.lineTotalCents,
+        ],
+      );
+
+      await client.query(
+        `
+          UPDATE inventory_counts
+          SET qty = qty - $3,
+              updated_at = now()
+          WHERE branch_id = $1 AND product_variant_id = $2
+        `,
+        [branchId, it.productVariantId, it.qty],
+      );
+
+      await client.query(
+        `
+          INSERT INTO stock_movements (branch_id, product_variant_id, delta, reason, ref)
+          VALUES ($1, $2, $3, $4, $5)
+        `,
+        [branchId, it.productVariantId, -it.qty, "sale", String(sale.id)],
+      );
+    }
+
+    await client.query("COMMIT");
+    res.json({
+      sale: {
+        id: String(sale.id || "").trim(),
+        receiptNumber: String(sale.receipt_number || "").trim(),
+        subtotal: fromCents(sale.subtotal_cents),
+        total: fromCents(sale.total_cents),
+        paymentMethod: String(sale.payment_method || "").trim(),
+        createdAt: sale.created_at,
+      },
+    });
+  } catch (e) {
+    try {
+      if (client) await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      void rollbackError;
+    }
+    res.status(500).json({ error: String(e?.message || e) });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+app.get("/api/inventory/movements", async (req, res) => {
+  const client = pool ? await pool.connect() : null;
+  try {
+    if (!client) throw new Error("DATABASE_URL is not set");
+    const branchId = await getBranchIdForRequest(client, req);
+    if (!branchId) throw new Error("branch_not_found");
+
+    const limitRaw = Number(req.query?.limit ?? 50);
+    const limit = Math.min(
+      200,
+      Math.max(1, Math.floor(Number.isFinite(limitRaw) ? limitRaw : 50)),
+    );
+    const pageRaw = Number(req.query?.page ?? 1);
+    const page = Math.max(
+      1,
+      Math.floor(Number.isFinite(pageRaw) ? pageRaw : 1),
+    );
+    const offset = (page - 1) * limit;
+
+    const categoryId = String(req.query?.categoryId || "").trim() || null;
+
+    const args = [branchId];
+    let where = `sm.branch_id = $1`;
+    if (categoryId) {
+      args.push(categoryId);
+      where += ` AND c.id = $${args.length}`;
+    }
+    args.push(limit + 1);
+    args.push(offset);
+
+    const r = await client.query(
+      `
+        SELECT
+          sm.id,
+          sm.created_at,
+          sm.reason,
+          sm.delta,
+          sm.ref,
+          pv.code AS code,
+          pv.talla AS talla,
+          c.id AS category_id,
+          c.name AS category_name
+        FROM stock_movements sm
+        JOIN product_variants pv ON pv.id = sm.product_variant_id
+        JOIN categories c ON c.id = pv.category_id
+        WHERE ${where}
+        ORDER BY sm.created_at DESC, sm.id DESC
+        LIMIT $${args.length - 1}
+        OFFSET $${args.length}
+      `,
+      args,
+    );
+
+    const rows = Array.isArray(r?.rows) ? r.rows : [];
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+
+    res.json({
+      page,
+      limit,
+      hasMore,
+      movements: pageRows.map((row) => ({
+        id: String(row.id || "").trim(),
+        createdAt: row.created_at,
+        reason: String(row.reason || "").trim(),
+        delta: Number(row.delta ?? 0),
+        ref: String(row.ref || "").trim(),
+        code: String(row.code || "").trim(),
+        talla: String(row.talla || "").trim(),
+        categoryId: String(row.category_id || "").trim(),
+        categoryName: String(row.category_name || "").trim(),
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  } finally {
+    if (client) client.release();
+  }
+});
+
 app.get("/api/inventory/stock", async (req, res) => {
   const client = pool ? await pool.connect() : null;
   try {

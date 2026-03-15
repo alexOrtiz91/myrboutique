@@ -17,6 +17,7 @@ import { CSS } from "@dnd-kit/utilities";
 import BigButton from "../components/BigButton.jsx";
 import Field from "../components/Field.jsx";
 import SelectField from "../components/SelectField.jsx";
+import ModalDialog from "../components/ModalDialog.jsx";
 import { apiGet, apiSend } from "../api.js";
 import { getCategoryById } from "../mocks/catalog.js";
 
@@ -468,6 +469,34 @@ export default function TiendaAdminPage() {
     return "catalogos";
   });
   const [dataSource, setDataSource] = useState("local");
+  const [dialog, setDialog] = useState(null);
+  const dialogResolveRef = useRef(null);
+
+  function openDialog(next) {
+    return new Promise((resolve) => {
+      dialogResolveRef.current = resolve;
+      setDialog(next);
+    });
+  }
+
+  async function showAlert(text, title) {
+    await openDialog({
+      kind: "alert",
+      title: String(title || "Aviso"),
+      text: String(text || ""),
+    });
+  }
+
+  async function showConfirm(text, title) {
+    const r = await openDialog({
+      kind: "confirm",
+      title: String(title || "Confirmar"),
+      text: String(text || ""),
+      confirmLabel: "Sí",
+      cancelLabel: "No",
+    });
+    return Boolean(r);
+  }
   const [branches, setBranches] = useState(() => {
     return Array.isArray(persisted?.branches) ? persisted.branches : [];
   });
@@ -1017,7 +1046,8 @@ export default function TiendaAdminPage() {
       if (Number.isFinite(stock) && stock > 0) totalStock += stock;
 
       const potential = Number(g?.totalPotential ?? 0);
-      if (Number.isFinite(potential) && potential > 0) totalPotential += potential;
+      if (Number.isFinite(potential) && potential > 0)
+        totalPotential += potential;
     }
     return { totalStock, totalPotential: roundMoney(totalPotential) };
   }, [inventoryByCategoryFiltered]);
@@ -1192,7 +1222,7 @@ export default function TiendaAdminPage() {
       setNewBranchName("");
       await refreshStockFromApi(createdId);
     } catch (e) {
-      window.alert(String(e?.message || e));
+      await showAlert(String(e?.message || e), "Tienda Admin");
     }
   }
 
@@ -1223,7 +1253,7 @@ export default function TiendaAdminPage() {
       setEditingBranchId(null);
       setEditBranchName("");
     } catch (e) {
-      window.alert(String(e?.message || e));
+      await showAlert(String(e?.message || e), "Tienda Admin");
     }
   }
 
@@ -1233,7 +1263,10 @@ export default function TiendaAdminPage() {
     if (!id) return;
     const branch = branches.find((b) => String(b?.id || "").trim() === id);
     const name = String(branch?.name || "").trim() || "esta tienda";
-    const ok = window.confirm(`¿Seguro que quieres eliminar "${name}"?`);
+    const ok = await showConfirm(
+      `¿Seguro que quieres eliminar "${name}"?`,
+      "Tienda Admin",
+    );
     if (!ok) return;
 
     try {
@@ -1241,10 +1274,13 @@ export default function TiendaAdminPage() {
     } catch (e) {
       const message = String(e?.message || e);
       if (message.includes("409") || message.includes("has_stock")) {
-        window.alert("No puedes eliminar esta tienda porque tiene stock.");
+        await showAlert(
+          "No puedes eliminar esta tienda porque tiene stock.",
+          "Tienda Admin",
+        );
         return;
       }
-      window.alert(message);
+      await showAlert(message, "Tienda Admin");
       return;
     }
 
@@ -1277,7 +1313,7 @@ export default function TiendaAdminPage() {
     if (!Number.isFinite(price) || price < 0) return;
     if (!Number.isFinite(creditPrice) || creditPrice < 0) return;
     if (!profile) {
-      window.alert("Selecciona un perfil de tallas");
+      await showAlert("Selecciona un perfil de tallas", "Tienda Admin");
       return;
     }
 
@@ -1307,7 +1343,7 @@ export default function TiendaAdminPage() {
         void r;
         await refreshCategoriesFromApi(profile.id);
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
         return;
       }
     } else {
@@ -1360,7 +1396,7 @@ export default function TiendaAdminPage() {
     if (!Number.isFinite(price) || price < 0) return;
     if (!Number.isFinite(creditPrice) || creditPrice < 0) return;
     if (!profile) {
-      window.alert("Selecciona un perfil de tallas");
+      await showAlert("Selecciona un perfil de tallas", "Tienda Admin");
       return;
     }
 
@@ -1386,7 +1422,7 @@ export default function TiendaAdminPage() {
         await apiSend("/api/catalog/categories", "POST", nextCategory);
         await refreshCategoriesFromApi(profile.id);
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
         return;
       }
     } else {
@@ -1399,7 +1435,7 @@ export default function TiendaAdminPage() {
   async function addProduct() {
     if (!effectiveNewProductCategoryId) return;
     if (!effectiveNewProductTalla) {
-      window.alert("Selecciona una talla");
+      await showAlert("Selecciona una talla", "Tienda Admin");
       return;
     }
     if (
@@ -1411,7 +1447,10 @@ export default function TiendaAdminPage() {
             String(effectiveNewProductTalla || "").trim(),
       )
     ) {
-      window.alert("Ya existe un producto con esa categoría y talla");
+      await showAlert(
+        "Ya existe un producto con esa categoría y talla",
+        "Tienda Admin",
+      );
       return;
     }
 
@@ -1444,115 +1483,18 @@ export default function TiendaAdminPage() {
       } catch (e) {
         const message = String(e?.message || e);
         if (message.includes("409") || message.includes("duplicate_variant")) {
-          window.alert("Ya existe un producto con esa categoría y talla");
+          await showAlert(
+            "Ya existe un producto con esa categoría y talla",
+            "Tienda Admin",
+          );
         } else {
-          window.alert(message);
+          await showAlert(message, "Tienda Admin");
         }
       }
       return;
     }
     setProducts((prev) => [...prev, product]);
     setStockByProductCode((prev) => ({ ...prev, [code]: prev?.[code] ?? 0 }));
-  }
-
-  async function generateProductsForAllCategories() {
-    if (!categories.length) {
-      window.alert("No hay categorías");
-      return;
-    }
-    if (!sizeProfiles.length) {
-      window.alert("No hay perfiles de tallas");
-      return;
-    }
-
-    const existingByCategory = {};
-    for (const p of products) {
-      const categoryId = String(p?.categoryId || "").trim();
-      const talla = String(p?.talla || "").trim();
-      if (!categoryId || !talla) continue;
-      if (!existingByCategory[categoryId])
-        existingByCategory[categoryId] = new Set();
-      existingByCategory[categoryId].add(talla);
-    }
-
-    const pending = [];
-    for (const c of categories) {
-      const profileId = guessProfileIdFromCategory(c, sizeProfiles);
-      const profile = getProfileById(sizeProfiles, profileId);
-      const tallas = getProfileTallas(profile);
-      if (!tallas.length) continue;
-      const existing = existingByCategory[String(c.id)] || new Set();
-      for (const t of tallas) {
-        const talla = String(t || "").trim();
-        if (!talla) continue;
-        if (existing.has(talla)) continue;
-        pending.push({ categoryId: String(c.id), talla });
-      }
-    }
-
-    if (!pending.length) {
-      window.alert(
-        "Ya existen productos para todas las tallas en todas las categorías",
-      );
-      return;
-    }
-
-    const preview = pending
-      .slice(0, 12)
-      .map((p) => `${p.categoryId}:${p.talla}`)
-      .join(", ");
-    const more = pending.length > 12 ? "…" : "";
-    const ok = window.confirm(
-      `Se crearán ${pending.length} productos (tallas faltantes) en todas las categorías.\n${preview}${more}\n\nEsto no modifica ni elimina productos existentes. ¿Continuar?`,
-    );
-    if (!ok) return;
-
-    let max = 1000;
-    const usedCodes = new Set(products.map((p) => String(p.code)));
-    for (const p of products) {
-      const n = Number.parseInt(String(p.code), 10);
-      if (Number.isFinite(n)) max = Math.max(max, n);
-    }
-
-    const nextCode = () => {
-      let n = max + 1;
-      while (usedCodes.has(String(n))) n += 1;
-      max = n;
-      const code = String(n);
-      usedCodes.add(code);
-      return code;
-    };
-
-    const created = [];
-    for (const item of pending) {
-      const product = {
-        code: nextCode(),
-        categoryId: item.categoryId,
-        talla: item.talla,
-      };
-      if (dataSource === "api") {
-        try {
-          const r = await apiSend("/api/catalog/products", "POST", product);
-          const saved = r?.product || product;
-          created.push(saved);
-        } catch (e) {
-          window.alert(
-            `No se pudieron generar todos los productos.\nCreados: ${created.length}\nError: ${String(e?.message || e)}`,
-          );
-          break;
-        }
-      } else {
-        created.push(product);
-      }
-    }
-
-    if (!created.length) return;
-    setProducts((prev) => [...prev, ...created]);
-    setStockByProductCode((prev) => {
-      const next = { ...(prev || {}) };
-      for (const p of created) next[p.code] = next?.[p.code] ?? 0;
-      return next;
-    });
   }
 
   function beginEditCategory(category) {
@@ -1594,7 +1536,7 @@ export default function TiendaAdminPage() {
     if (!Number.isFinite(price) || price < 0) return;
     if (!Number.isFinite(creditPrice) || creditPrice < 0) return;
     if (!profile) {
-      window.alert("Selecciona un perfil de tallas");
+      await showAlert("Selecciona un perfil de tallas", "Tienda Admin");
       return;
     }
 
@@ -1622,7 +1564,7 @@ export default function TiendaAdminPage() {
         );
         await refreshCategoriesFromApi(profile.id);
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
         return;
       }
     } else {
@@ -1648,13 +1590,17 @@ export default function TiendaAdminPage() {
 
   async function deleteCategory(categoryId) {
     if (categoryHasStock?.[categoryId]) {
-      window.alert("No puedes eliminar esta categoría porque tiene stock.");
+      await showAlert(
+        "No puedes eliminar esta categoría porque tiene stock.",
+        "Tienda Admin",
+      );
       return;
     }
     const category = getCategoryById(categories, categoryId);
     const name = category?.name ? `"${category.name}"` : "esta categoría";
-    const ok = window.confirm(
+    const ok = await showConfirm(
       `¿Seguro que quieres eliminar ${name}? También se quitarán sus productos.`,
+      "Tienda Admin",
     );
     if (!ok) return;
     let nextCategories = categories.filter((c) => c.id !== categoryId);
@@ -1668,7 +1614,7 @@ export default function TiendaAdminPage() {
         nextCategories = await refreshCategoriesFromApi();
         fallbackCategoryId = nextCategories[0]?.id || "";
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
         return;
       }
     } else {
@@ -1712,11 +1658,11 @@ export default function TiendaAdminPage() {
     const categoryId = String(effectiveEditProductCategoryId || "").trim();
     const talla = String(effectiveEditProductTalla || "").trim();
     if (!categoryId) {
-      window.alert("Selecciona una categoría");
+      await showAlert("Selecciona una categoría", "Tienda Admin");
       return;
     }
     if (!talla) {
-      window.alert("Selecciona una talla");
+      await showAlert("Selecciona una talla", "Tienda Admin");
       return;
     }
     if (
@@ -1727,7 +1673,10 @@ export default function TiendaAdminPage() {
           String(p?.talla || "").trim() === talla,
       )
     ) {
-      window.alert("Ya existe un producto con esa categoría y talla");
+      await showAlert(
+        "Ya existe un producto con esa categoría y talla",
+        "Tienda Admin",
+      );
       return;
     }
 
@@ -1749,11 +1698,17 @@ export default function TiendaAdminPage() {
       } catch (e) {
         const message = String(e?.message || e);
         if (message.includes("409") || message.includes("duplicate_variant")) {
-          window.alert("Ya existe un producto con esa categoría y talla");
+          await showAlert(
+            "Ya existe un producto con esa categoría y talla",
+            "Tienda Admin",
+          );
         } else if (message.includes("has_stock")) {
-          window.alert("No puedes editar este producto porque tiene stock.");
+          await showAlert(
+            "No puedes editar este producto porque tiene stock.",
+            "Tienda Admin",
+          );
         } else {
-          window.alert(message);
+          await showAlert(message, "Tienda Admin");
         }
         return;
       }
@@ -1778,8 +1733,9 @@ export default function TiendaAdminPage() {
       ? `"${product.categoryName}"`
       : "esta categoría";
     const talla = product?.talla ? `"${product.talla}"` : "—";
-    const ok = window.confirm(
+    const ok = await showConfirm(
       `¿Seguro que quieres eliminar el producto ${code}?\nCategoría: ${name}\nTalla: ${talla}`,
+      "Tienda Admin",
     );
     if (!ok) return;
 
@@ -1792,9 +1748,12 @@ export default function TiendaAdminPage() {
       } catch (e) {
         const message = String(e?.message || e);
         if (message.includes("has_stock") || message.includes("409")) {
-          window.alert("No puedes eliminar este producto porque tiene stock.");
+          await showAlert(
+            "No puedes eliminar este producto porque tiene stock.",
+            "Tienda Admin",
+          );
         } else {
-          window.alert(message);
+          await showAlert(message, "Tienda Admin");
         }
         return;
       }
@@ -1825,7 +1784,7 @@ export default function TiendaAdminPage() {
     if (!label || !baseId) return;
     const id = nextAvailableProfileId(baseId);
     if (!fixedGeneros.includes(newSizeProfileGenero)) {
-      window.alert("Selecciona un género");
+      await showAlert("Selecciona un género", "Tienda Admin");
       return;
     }
     const genero = newSizeProfileGenero;
@@ -1840,7 +1799,7 @@ export default function TiendaAdminPage() {
         void r;
         await refreshSizeProfilesFromApi();
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
         return;
       }
     } else {
@@ -1880,7 +1839,7 @@ export default function TiendaAdminPage() {
       );
       await refreshSizeProfilesFromApi();
     } catch (e) {
-      window.alert(String(e?.message || e));
+      await showAlert(String(e?.message || e), "Tienda Admin");
     }
   }
 
@@ -1911,15 +1870,16 @@ export default function TiendaAdminPage() {
           },
         );
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
       }
     }
     setProfileValueDraft((prev) => ({ ...prev, [profileId]: "" }));
   }
 
   async function removeSizeProfileValue(profileId, value) {
-    const ok = window.confirm(
+    const ok = await showConfirm(
       `¿Seguro que quieres quitar la talla "${value}"?`,
+      "Tienda Admin",
     );
     if (!ok) return;
     let nextValues = null;
@@ -1941,7 +1901,7 @@ export default function TiendaAdminPage() {
           },
         );
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
       }
     }
   }
@@ -1959,7 +1919,7 @@ export default function TiendaAdminPage() {
           { values: nextValues },
         );
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
       }
     }
   }
@@ -2016,7 +1976,7 @@ export default function TiendaAdminPage() {
         );
         await refreshSizeProfilesFromApi();
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
         await refreshSizeProfilesFromApi();
       }
     } else {
@@ -2036,8 +1996,9 @@ export default function TiendaAdminPage() {
     if (!nextProfiles.length) return;
     const fallbackId = getDefaultProfileId(nextProfiles);
     const name = profile?.label ? `"${profile.label}"` : "este perfil";
-    const ok = window.confirm(
+    const ok = await showConfirm(
       `¿Seguro que quieres eliminar ${name}? Las categorías que lo usan se moverán a "${fallbackId}".`,
+      "Tienda Admin",
     );
     if (!ok) return;
 
@@ -2053,7 +2014,7 @@ export default function TiendaAdminPage() {
         await refreshSizeProfilesFromApi();
         await refreshCategoriesFromApi(fallbackId);
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
         return;
       }
       setSelectedProfileId((prev) => (prev === profileId ? null : prev));
@@ -2106,7 +2067,7 @@ export default function TiendaAdminPage() {
 
     const desired = Number.parseInt(String(inventoryStockDraft || 0), 10);
     if (!Number.isFinite(desired) || desired < 0) {
-      window.alert("Stock inválido");
+      await showAlert("Stock inválido", "Tienda Admin");
       return;
     }
 
@@ -2120,8 +2081,9 @@ export default function TiendaAdminPage() {
     }
 
     if (delta < 0) {
-      const ok = window.confirm(
+      const ok = await showConfirm(
         `¿Seguro que quieres quitar ${Math.abs(delta)} de stock?`,
+        "Tienda Admin",
       );
       if (!ok) return;
     }
@@ -2141,7 +2103,7 @@ export default function TiendaAdminPage() {
         setStockByProductCode((prev) => ({ ...(prev || {}), [code]: nextQty }));
         closeInventoryAdjustRow();
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
       }
       return;
     }
@@ -2161,8 +2123,9 @@ export default function TiendaAdminPage() {
     if (!Number.isFinite(n) || n <= 0) return;
     const d = delta * n;
     if (d < 0) {
-      const ok = window.confirm(
+      const ok = await showConfirm(
         `¿Seguro que quieres quitar ${Math.abs(d)} de stock?`,
+        "Tienda Admin",
       );
       if (!ok) return;
     }
@@ -2180,7 +2143,7 @@ export default function TiendaAdminPage() {
         const nextQty = Number(r?.qty ?? 0);
         setStockByProductCode((prev) => ({ ...(prev || {}), [code]: nextQty }));
       } catch (e) {
-        window.alert(String(e?.message || e));
+        await showAlert(String(e?.message || e), "Tienda Admin");
       }
       return;
     }
@@ -2192,6 +2155,26 @@ export default function TiendaAdminPage() {
 
   return (
     <div className="space-y-5">
+      <ModalDialog
+        open={Boolean(dialog)}
+        kind={dialog?.kind}
+        title={dialog?.title}
+        text={dialog?.text}
+        confirmLabel={dialog?.confirmLabel}
+        cancelLabel={dialog?.cancelLabel}
+        onCancel={() => {
+          const resolve = dialogResolveRef.current;
+          dialogResolveRef.current = null;
+          setDialog(null);
+          resolve?.(false);
+        }}
+        onConfirm={() => {
+          const resolve = dialogResolveRef.current;
+          dialogResolveRef.current = null;
+          setDialog(null);
+          resolve?.(true);
+        }}
+      />
       <div className="flex flex-wrap gap-3 print:hidden">
         <TabButton
           active={tab === "catalogos"}
@@ -2739,16 +2722,9 @@ export default function TiendaAdminPage() {
                       ]}
                     />
                     <div className="sm:col-span-2">
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-3">
                         <BigButton className="w-full" onClick={addProduct}>
                           Crear producto
-                        </BigButton>
-                        <BigButton
-                          className="w-full"
-                          variant="secondary"
-                          onClick={generateProductsForAllCategories}
-                        >
-                          Generar todas las tallas
                         </BigButton>
                       </div>
                     </div>
@@ -3278,8 +3254,7 @@ export default function TiendaAdminPage() {
                               {g.items.length} tallas · Total:{" "}
                               <span className="font-extrabold tabular-nums">
                                 {g.totalStock}
-                              </span>
-                              {" "}
+                              </span>{" "}
                               · Potencial:{" "}
                               <span className="font-extrabold tabular-nums">
                                 ${roundMoney(g.totalPotential)}

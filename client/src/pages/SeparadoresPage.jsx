@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import BigButton from "../components/BigButton.jsx";
 import Field from "../components/Field.jsx";
 import SelectField from "../components/SelectField.jsx";
+import ModalDialog from "../components/ModalDialog.jsx";
 import { apiGet, apiSend } from "../api.js";
 import logoPng from "../assets/logo.png?inline";
 const A4_WIDTH_MM = 210;
@@ -485,6 +486,34 @@ function A4TemplateSvg({
 export default function SeparadoresPage() {
   const svgRefsValues = useRef([]);
   const svgRefsVariables = useRef([]);
+  const [dialog, setDialog] = useState(null);
+  const dialogResolveRef = useRef(null);
+
+  function openDialog(next) {
+    return new Promise((resolve) => {
+      dialogResolveRef.current = resolve;
+      setDialog(next);
+    });
+  }
+
+  async function showAlert(text, title) {
+    await openDialog({
+      kind: "alert",
+      title: String(title || "Aviso"),
+      text: String(text || ""),
+    });
+  }
+
+  async function showConfirm(text, title) {
+    const r = await openDialog({
+      kind: "confirm",
+      title: String(title || "Confirmar"),
+      text: String(text || ""),
+      confirmLabel: "Continuar",
+      cancelLabel: "Cancelar",
+    });
+    return Boolean(r);
+  }
 
   const [sizes, setSizes] = useState([]);
   const [sizesStatus, setSizesStatus] = useState("idle");
@@ -745,7 +774,7 @@ export default function SeparadoresPage() {
         apiError === "duplicate_name" ||
         message === "duplicate_name"
       ) {
-        window.alert("Ya existe una talla con este nombre");
+        await showAlert("Ya existe una talla con este nombre", "Separadores");
         setSizesStatus("error");
         setSizesError("Ya existe una talla con este nombre");
         return;
@@ -759,7 +788,10 @@ export default function SeparadoresPage() {
     const safeId = String(id || "").trim();
     if (!safeId) return;
     const label = String(name || "").trim() || "esta talla";
-    const ok = window.confirm(`¿Seguro que quieres eliminar "${label}"?`);
+    const ok = await showConfirm(
+      `¿Seguro que quieres eliminar "${label}"?`,
+      "Separadores",
+    );
     if (!ok) return;
     setSizesError("");
     setSizesStatus("saving");
@@ -828,7 +860,7 @@ export default function SeparadoresPage() {
         apiError === "duplicate_name" ||
         message === "duplicate_name"
       ) {
-        window.alert("Ya existe una talla con este nombre");
+        await showAlert("Ya existe una talla con este nombre", "Separadores");
         setSizesStatus("error");
         setSizesError("Ya existe una talla con este nombre");
         return;
@@ -875,6 +907,26 @@ export default function SeparadoresPage() {
 
   return (
     <div className="space-y-5 print:space-y-0">
+      <ModalDialog
+        open={Boolean(dialog)}
+        kind={dialog?.kind}
+        title={dialog?.title}
+        text={dialog?.text}
+        confirmLabel={dialog?.confirmLabel}
+        cancelLabel={dialog?.cancelLabel}
+        onCancel={() => {
+          const resolve = dialogResolveRef.current;
+          dialogResolveRef.current = null;
+          setDialog(null);
+          resolve?.(false);
+        }}
+        onConfirm={() => {
+          const resolve = dialogResolveRef.current;
+          dialogResolveRef.current = null;
+          setDialog(null);
+          resolve?.(true);
+        }}
+      />
       <style>{`
         @media print {
           @page {

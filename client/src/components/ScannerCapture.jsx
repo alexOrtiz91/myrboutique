@@ -47,15 +47,20 @@ export default function ScannerCapture({
     focusInput();
 
     const interval = window.setInterval(focusInput, 500);
+    const onPointerDown = () => focusInput();
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") focusInput();
     };
     window.addEventListener("focus", focusInput);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("touchstart", onPointerDown, true);
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", focusInput);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("touchstart", onPointerDown, true);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [autoFocus]);
@@ -112,7 +117,11 @@ export default function ScannerCapture({
       onKeyDown(e);
     }
     window.addEventListener("keydown", onWindowKeyDown, true);
-    return () => window.removeEventListener("keydown", onWindowKeyDown, true);
+    document.addEventListener("keydown", onWindowKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onWindowKeyDown, true);
+      document.removeEventListener("keydown", onWindowKeyDown, true);
+    };
   }, [globalCapture]);
 
   const inputEl = (
@@ -131,7 +140,7 @@ export default function ScannerCapture({
           window.setTimeout(() => inputRef.current?.focus(), 50);
         }
       }}
-      className="absolute opacity-0 pointer-events-none"
+      className="fixed left-0 top-0 h-1 w-1 opacity-0 pointer-events-none"
       aria-hidden="true"
       tabIndex={0}
     />

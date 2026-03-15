@@ -6,6 +6,7 @@ const navItems = [
   { to: "/etiquetas", label: "Etiquetas" },
   { to: "/separadores", label: "Separadores" },
   { to: "/inventario-demo", label: "Inventario" },
+  { to: "/ventas", label: "Ventas" },
   { to: "/pos-demo", label: "POS" },
 ];
 

@@ -98,6 +98,8 @@ CREATE TABLE
     subtotal_cents INTEGER NOT NULL CHECK (subtotal_cents >= 0),
     total_cents INTEGER NOT NULL CHECK (total_cents >= 0),
     payment_method TEXT NOT NULL,
+    canceled_at TIMESTAMPTZ,
+    canceled_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now ()
   );
 

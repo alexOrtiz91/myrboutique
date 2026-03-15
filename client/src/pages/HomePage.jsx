@@ -17,6 +17,11 @@ const cards = [
     subtitle: "Conteo rápido por categoría usando escáner",
   },
   {
+    to: "/ventas",
+    title: "Ventas",
+    subtitle: "Historial de ventas y desglose por ticket",
+  },
+  {
     to: "/pos-demo",
     title: "POS",
     subtitle: "Ticket simple y flujo de escaneo (tablet)",

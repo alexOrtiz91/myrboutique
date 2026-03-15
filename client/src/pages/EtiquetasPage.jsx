@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import BigButton from "../components/BigButton.jsx";
 import QrImage from "../components/QrImage.jsx";
 import Field from "../components/Field.jsx";
 import SelectField from "../components/SelectField.jsx";
+import ModalDialog from "../components/ModalDialog.jsx";
 import { apiGet } from "../api.js";
 import {
   getCategoryById,
@@ -115,6 +116,35 @@ function PrintableLabel({ category, product, codeText }) {
 }
 
 export default function EtiquetasPage() {
+  const [dialog, setDialog] = useState(null);
+  const dialogResolveRef = useRef(null);
+
+  function openDialog(next) {
+    return new Promise((resolve) => {
+      dialogResolveRef.current = resolve;
+      setDialog(next);
+    });
+  }
+
+  async function showAlert(text, title) {
+    await openDialog({
+      kind: "alert",
+      title: String(title || "Aviso"),
+      text: String(text || ""),
+    });
+  }
+
+  async function showConfirm(text, title) {
+    const r = await openDialog({
+      kind: "confirm",
+      title: String(title || "Confirmar"),
+      text: String(text || ""),
+      confirmLabel: "Continuar",
+      cancelLabel: "Cancelar",
+    });
+    return Boolean(r);
+  }
+
   const [categories, setCategories] = useState(() => {
     const persisted = readJson(STORAGE_KEY);
     if (Array.isArray(persisted?.categories) && persisted.categories.length) {
@@ -306,7 +336,7 @@ export default function EtiquetasPage() {
     return Math.ceil(total / SHEET_PAGE_SIZE);
   }, [bulkTotalPreview]);
 
-  function addBulkToSheet() {
+  async function addBulkToSheet() {
     const { allQty, tallaQtyMap } = parseBulkQtyConfig(bulkTallaQtyText);
 
     const pending = [];
@@ -325,20 +355,23 @@ export default function EtiquetasPage() {
     }
 
     if (!pending.length) {
-      window.alert(
+      await showAlert(
         "No hay etiquetas para agregar. Escribe 30 para todas o usa formato 22=10,24=10.",
+        "Etiquetas",
       );
       return;
     }
     if (total > 20000) {
-      window.alert(
+      await showAlert(
         `Demasiadas etiquetas (${total}). Máximo 20000 por operación.`,
+        "Etiquetas",
       );
       return;
     }
     if (total > 5000) {
-      const ok = window.confirm(
+      const ok = await showConfirm(
         `Se agregarán ${total} etiquetas a la hoja.\n\n¿Continuar?`,
+        "Etiquetas",
       );
       if (!ok) return;
     }
@@ -374,6 +407,26 @@ export default function EtiquetasPage() {
 
   return (
     <div className="space-y-5 print:space-y-0">
+      <ModalDialog
+        open={Boolean(dialog)}
+        kind={dialog?.kind}
+        title={dialog?.title}
+        text={dialog?.text}
+        confirmLabel={dialog?.confirmLabel}
+        cancelLabel={dialog?.cancelLabel}
+        onCancel={() => {
+          const resolve = dialogResolveRef.current;
+          dialogResolveRef.current = null;
+          setDialog(null);
+          resolve?.(false);
+        }}
+        onConfirm={() => {
+          const resolve = dialogResolveRef.current;
+          dialogResolveRef.current = null;
+          setDialog(null);
+          resolve?.(true);
+        }}
+      />
       <style>{`
         @media print {
           @page {
