@@ -28,51 +28,19 @@ function readJson(key) {
   }
 }
 
-function parseTallaQtyMap(raw) {
-  const map = new Map();
-  const parts = String(raw || "")
-    .split(/[\n,;]+/g)
-    .map((s) => String(s || "").trim())
-    .filter(Boolean);
-
-  for (const part of parts) {
-    const match = part.match(/^(.+?)(?:\s*[=:x]\s*)(\d+)$/i);
-    if (!match) continue;
-    const talla = String(match[1] || "").trim();
-    const qty = Number(match[2] || 0);
-    if (!talla) continue;
-    if (!Number.isFinite(qty) || qty < 0) continue;
-    map.set(talla, qty);
-  }
-
-  return map;
-}
-
-function parseBulkQtyConfig(raw) {
-  const trimmed = String(raw || "").trim();
-  if (!trimmed) return { allQty: null, tallaQtyMap: new Map() };
-  if (/^\d+$/.test(trimmed)) {
-    const qty = Number(trimmed);
-    if (!Number.isFinite(qty) || qty < 0)
-      return { allQty: null, tallaQtyMap: new Map() };
-    return { allQty: qty, tallaQtyMap: new Map() };
-  }
-  return { allQty: null, tallaQtyMap: parseTallaQtyMap(trimmed) };
-}
-
 function LabelPreview({ category, product, codeText }) {
   return (
     <div className="w-full rounded-2xl bg-white p-4 ring-1 ring-slate-200">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-lg font-extrabold tracking-tight">
+          <div className="text-2xl font-extrabold tracking-tight">
             {category?.name || "—"}
           </div>
-          <div className="mt-1 text-base font-extrabold tabular-nums">
+          <div className="mt-1 text-2xl font-extrabold tabular-nums">
             {product?.talla ? `Talla ${product.talla}` : ""}
           </div>
         </div>
-        <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-extrabold uppercase tracking-wide text-slate-600 ring-1 ring-slate-200">
+        <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm font-extrabold uppercase tracking-wide text-slate-600 ring-1 ring-slate-200">
           QR
         </div>
       </div>
@@ -83,7 +51,7 @@ function LabelPreview({ category, product, codeText }) {
         </div>
       </div>
 
-      <div className="mt-2 text-center text-xs font-semibold text-slate-500">
+      <div className="mt-3 text-center text-xl font-extrabold text-slate-800">
         {product?.talla ? `${codeText} · Talla ${product.talla}` : codeText}
       </div>
     </div>
@@ -92,20 +60,20 @@ function LabelPreview({ category, product, codeText }) {
 
 function PrintableLabel({ category, product, codeText }) {
   return (
-    <div className="rounded-xl border border-slate-300 bg-white p-3 print:flex print:h-full print:w-full print:flex-col print:items-center print:justify-center print:gap-[0.1mm] print:overflow-hidden print:rounded-none print:border-0 print:bg-transparent print:p-0 print:text-center">
-      <div className="text-sm font-extrabold tracking-tight print:text-[4px] print:leading-tight">
+    <div className="h-full w-full bg-white p-2 print:flex print:h-full print:w-full print:flex-col print:items-center print:justify-center print:gap-[0.1mm] print:overflow-hidden print:bg-transparent print:p-0 print:text-center">
+      <div className="text-[11px] font-extrabold tracking-tight print:text-[5.4px] print:leading-[1.05]">
         {category?.name || "—"}
       </div>
-      <div className="text-sm font-extrabold tabular-nums print:text-[4px] print:leading-tight">
+      <div className="text-[12px] font-extrabold tabular-nums print:text-[7px] print:leading-[1.05]">
         {product?.talla ? `T ${product.talla}` : ""}
       </div>
       <div className="mt-2 print:mt-0">
-        <div className="mx-auto w-28 print:w-[10mm]">
+        <div className="mx-auto w-28 print:w-[11mm]">
           <QrImage text={codeText} />
         </div>
       </div>
-      <div className="mt-2 text-center text-[10px] font-semibold text-slate-700 print:mt-0 print:text-[3.6px] print:leading-tight">
-        {product?.talla ? `${codeText} · ${product.talla}` : codeText}
+      <div className="mt-2 text-center text-[14px] font-extrabold tabular-nums text-slate-900 print:mt-0 print:text-[6.4px] print:leading-[1.05]">
+        {codeText}
       </div>
     </div>
   );
@@ -114,6 +82,7 @@ function PrintableLabel({ category, product, codeText }) {
 export default function EtiquetasPage() {
   const [dialog, setDialog] = useState(null);
   const dialogResolveRef = useRef(null);
+  const sheetQtyDirtyRef = useRef({});
 
   function openDialog(next) {
     return new Promise((resolve) => {
@@ -183,8 +152,7 @@ export default function EtiquetasPage() {
   );
   const [sheetCount, setSheetCount] = useState(String(SHEET_PAGE_SIZE));
   const [sheet, setSheet] = useState([]);
-  const [bulkCategoryId, setBulkCategoryId] = useState("");
-  const [bulkTallaQtyText, setBulkTallaQtyText] = useState("");
+  const [sheetQtyDraftByCode, setSheetQtyDraftByCode] = useState({});
 
   useEffect(() => {
     let alive = true;
@@ -261,20 +229,6 @@ export default function EtiquetasPage() {
     [products, effectiveSelectedProductCode],
   );
 
-  const effectiveBulkCategoryId = useMemo(() => {
-    if (!categories.length) return "";
-    if (!bulkCategoryId) return "";
-    return categories.some((c) => c.id === bulkCategoryId)
-      ? bulkCategoryId
-      : "";
-  }, [categories, bulkCategoryId]);
-
-  const productsForBulk = useMemo(() => {
-    return products.filter((p) =>
-      effectiveBulkCategoryId ? p.categoryId === effectiveBulkCategoryId : true,
-    );
-  }, [products, effectiveBulkCategoryId]);
-
   const codeText = useMemo(() => {
     if (!selectedProduct) return "";
     return String(selectedProduct.code || "").trim();
@@ -312,93 +266,167 @@ export default function EtiquetasPage() {
     });
   }
 
-  const bulkTotalPreview = useMemo(() => {
-    const { allQty, tallaQtyMap } = parseBulkQtyConfig(bulkTallaQtyText);
-    if (Number.isFinite(allQty) && allQty > 0) {
-      return productsForBulk.length * allQty;
-    }
-    return productsForBulk.reduce((acc, p) => {
-      const talla = String(p?.talla ?? "").trim();
-      const qty = tallaQtyMap.has(talla)
-        ? Number(tallaQtyMap.get(talla) || 0)
-        : 0;
-      return acc + (Number.isFinite(qty) && qty > 0 ? qty : 0);
-    }, 0);
-  }, [bulkTallaQtyText, productsForBulk]);
+  function removeFromSheetByProductCode(productCode, qtyToRemove) {
+    const code = String(productCode || "").trim();
+    if (!code) return;
+    const n = Number.parseInt(String(qtyToRemove || 0), 10);
+    const qty = Number.isFinite(n) ? Math.floor(n) : 0;
+    if (qty <= 0) return;
+    setSheet((prev) => {
+      let remaining = qty;
+      if (remaining <= 0) return prev;
+      const out = [];
+      for (let i = prev.length - 1; i >= 0; i -= 1) {
+        const it = prev[i];
+        if (remaining > 0 && String(it?.productCode || "").trim() === code) {
+          remaining -= 1;
+          continue;
+        }
+        out.push(it);
+      }
+      out.reverse();
+      return out;
+    });
+  }
 
-  const bulkPagesPreview = useMemo(() => {
-    const total = Number(bulkTotalPreview || 0);
-    if (!Number.isFinite(total) || total <= 0) return 0;
-    return Math.ceil(total / SHEET_PAGE_SIZE);
-  }, [bulkTotalPreview]);
-
-  async function addBulkToSheet() {
-    const { allQty, tallaQtyMap } = parseBulkQtyConfig(bulkTallaQtyText);
-
-    const pending = [];
-    let total = 0;
-    for (const p of productsForBulk) {
-      const talla = String(p?.talla ?? "").trim();
-      const qty =
-        Number.isFinite(allQty) && allQty > 0
-          ? allQty
-          : tallaQtyMap.has(talla)
-            ? Number(tallaQtyMap.get(talla) || 0)
-            : 0;
-      if (!Number.isFinite(qty) || qty <= 0) continue;
-      pending.push({ product: p, qty });
-      total += qty;
-    }
-
-    if (!pending.length) {
-      await showAlert(
-        "No hay etiquetas para agregar. Escribe 30 para todas o usa formato 22=10,24=10.",
-        "Etiquetas",
-      );
-      return;
-    }
-    if (total > 20000) {
-      await showAlert(
-        `Demasiadas etiquetas (${total}). Máximo 20000 por operación.`,
-        "Etiquetas",
-      );
-      return;
-    }
-    if (total > 5000) {
-      const ok = await showConfirm(
-        `Se agregarán ${total} etiquetas a la hoja.\n\n¿Continuar?`,
-        "Etiquetas",
-      );
-      if (!ok) return;
-    }
+  function addToSheetByProductCode(productCode, qtyToAdd) {
+    const code = String(productCode || "").trim();
+    if (!code) return;
+    const n = Number.parseInt(String(qtyToAdd || 0), 10);
+    const qty = Number.isFinite(n) ? Math.floor(n) : 0;
+    if (qty <= 0) return;
+    const product = getProductByCode(products, code);
+    if (!product) return;
+    const ct = String(product?.code || "").trim();
+    if (!ct) return;
 
     setSheet((prev) => {
       const next = [...prev];
-      let seq = 0;
-      for (const entry of pending) {
-        const p = entry.product;
-        const ct = String(p?.code || "").trim();
-        if (!ct) continue;
-        for (let i = 0; i < entry.qty; i += 1) {
-          next.push({
-            id: `${Date.now()}-${Math.random()}-${seq}`,
-            categoryId: p.categoryId,
-            productCode: p.code,
-            codeText: ct,
-          });
-          seq += 1;
-        }
+      for (let i = 0; i < Math.min(2000, qty); i += 1) {
+        next.push({
+          id: `${Date.now()}-${Math.random()}-${i}`,
+          categoryId: String(product?.categoryId || "").trim(),
+          productCode: product.code,
+          codeText: ct,
+        });
       }
       return next;
     });
   }
 
-  function clearSheet() {
+  const sheetTallajeSummary = useMemo(() => {
+    const map = new Map();
+    for (const it of sheet) {
+      const code = String(it?.productCode || "").trim();
+      if (!code) continue;
+      map.set(code, (map.get(code) || 0) + 1);
+    }
+
+    const rows = [];
+    for (const [code, qty] of map.entries()) {
+      const product = getProductByCode(products, code);
+      const category = getCategoryById(categories, product?.categoryId || "");
+      const talla = String(product?.talla ?? "").trim();
+      rows.push({
+        productCode: code,
+        qty,
+        talla,
+        categoryName: category?.name || "—",
+      });
+    }
+
+    rows.sort((a, b) => {
+      if (a.categoryName !== b.categoryName)
+        return a.categoryName.localeCompare(b.categoryName);
+      if (a.talla !== b.talla) return a.talla.localeCompare(b.talla);
+      return a.productCode.localeCompare(b.productCode);
+    });
+
+    return rows;
+  }, [sheet, products, categories]);
+
+  useEffect(() => {
+    setSheetQtyDraftByCode((prev) => {
+      const next = { ...(prev || {}) };
+      const alive = new Set();
+      for (const row of sheetTallajeSummary) {
+        const key = String(row.productCode || "").trim();
+        if (!key) continue;
+        alive.add(key);
+        if (sheetQtyDirtyRef.current?.[key]) continue;
+        next[key] = String(row.qty);
+      }
+      for (const key of Object.keys(next)) {
+        if (!alive.has(key)) {
+          delete next[key];
+          if (sheetQtyDirtyRef.current?.[key])
+            delete sheetQtyDirtyRef.current[key];
+        }
+      }
+      return next;
+    });
+  }, [sheetTallajeSummary]);
+
+  async function clearSheet() {
+    if (!sheet.length) return;
+    const ok = await showConfirm(
+      `Vas a limpiar la hoja (${sheet.length} etiquetas). ¿Continuar?`,
+      "Etiquetas",
+    );
+    if (!ok) return;
     setSheet([]);
+    setSheetQtyDraftByCode({});
+    sheetQtyDirtyRef.current = {};
   }
 
   function printSheet() {
     window.print();
+  }
+
+  async function removeAllFromSheetByProductCode(productCode, currentQty) {
+    const code = String(productCode || "").trim();
+    if (!code) return;
+    const qty = Number(currentQty || 0);
+    const safeQty = Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 0;
+    if (!safeQty) return;
+    const ok = await showConfirm(
+      `Vas a borrar ${safeQty} etiquetas de esta talla. ¿Continuar?`,
+      "Etiquetas",
+    );
+    if (!ok) return;
+    removeFromSheetByProductCode(code, safeQty);
+    sheetQtyDirtyRef.current[code] = false;
+  }
+
+  async function applyDesiredQty(productCode) {
+    const code = String(productCode || "").trim();
+    if (!code) return;
+    const row = sheetTallajeSummary.find((r) => r.productCode === code) || null;
+    const currentQty = Number(row?.qty || 0);
+    const current =
+      Number.isFinite(currentQty) && currentQty > 0
+        ? Math.floor(currentQty)
+        : 0;
+
+    const draft = sheetQtyDraftByCode?.[code];
+    const n = Number.parseInt(String(draft || 0), 10);
+    const desired = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+    const delta = desired - current;
+    if (!delta) return;
+
+    if (delta < 0) {
+      const ok = await showConfirm(
+        `Vas a quitar ${Math.abs(delta)} etiquetas. ¿Continuar?`,
+        "Etiquetas",
+      );
+      if (!ok) return;
+      removeFromSheetByProductCode(code, Math.abs(delta));
+      sheetQtyDirtyRef.current[code] = false;
+      return;
+    }
+
+    addToSheetByProductCode(code, delta);
+    sheetQtyDirtyRef.current[code] = false;
   }
 
   return (
@@ -484,7 +512,7 @@ export default function EtiquetasPage() {
               <BigButton
                 className="w-full"
                 variant="secondary"
-                onClick={clearSheet}
+                onClick={() => void clearSheet()}
               >
                 Limpiar hoja
               </BigButton>
@@ -499,58 +527,94 @@ export default function EtiquetasPage() {
                 Imprimir
               </BigButton>
             </div>
+          </div>
 
-            <div className="sm:col-span-2 mt-2 border-t border-slate-200 pt-4">
-              <div className="text-lg font-extrabold tracking-tight">
-                Impresión masiva
+          <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+            <div>
+              <div className="text-base font-extrabold tracking-tight">
+                Conteo por talla y categoría
               </div>
               <div className="mt-1 text-sm font-semibold text-slate-600">
-                Escribe 30 para todas o usa formato 22=10,24=10,26=5.
+                Escribe la cantidad final por talla y presiona “Aplicar”.
               </div>
             </div>
 
-            <SelectField
-              label="Categoría (masivo)"
-              value={bulkCategoryId}
-              onChange={(e) => setBulkCategoryId(e.target.value)}
-              options={[
-                { value: "", label: "Todas" },
-                ...categories.map((c) => ({
-                  value: c.id,
-                  label: c.name,
-                })),
-              ]}
-              className="sm:col-span-2"
-            />
+            {!sheetTallajeSummary.length ? (
+              <div className="mt-3 text-sm font-semibold text-slate-600">
+                Sin etiquetas en la hoja.
+              </div>
+            ) : (
+              <div className="mt-3 grid grid-cols-1 gap-2">
+                {sheetTallajeSummary.map((row) => (
+                  <div
+                    key={row.productCode}
+                    className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-base font-extrabold text-slate-900">
+                        {row.categoryName}
+                      </div>
+                      <div className="mt-0.5 text-sm font-semibold text-slate-600">
+                        {row.talla ? `Talla ${row.talla}` : "Talla —"} ·{" "}
+                        <span className="font-extrabold tabular-nums">
+                          {row.productCode}
+                        </span>
+                      </div>
+                    </div>
 
-            <Field
-              label="Cantidades por talla"
-              value={bulkTallaQtyText}
-              onChange={(e) => setBulkTallaQtyText(e.target.value)}
-              placeholder="Ej. 30 o 22=10,24=10,26=5"
-              className="sm:col-span-2"
-            />
+                    <div className="flex shrink-0 items-center gap-2">
+                      <input
+                        value={sheetQtyDraftByCode?.[row.productCode] ?? ""}
+                        onChange={(e) => {
+                          sheetQtyDirtyRef.current[row.productCode] = true;
+                          setSheetQtyDraftByCode((prev) => ({
+                            ...(prev || {}),
+                            [row.productCode]: e.target.value,
+                          }));
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void applyDesiredQty(row.productCode);
+                          }
+                        }}
+                        inputMode="numeric"
+                        type="number"
+                        min="0"
+                        step="1"
+                        className={[
+                          "h-12 w-20 rounded-2xl bg-white px-3 text-base font-extrabold tabular-nums text-slate-900",
+                          "ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900",
+                        ].join(" ")}
+                      />
 
-            <div className="sm:col-span-2 text-sm font-semibold text-slate-600">
-              Productos:{" "}
-              <span className="font-extrabold tabular-nums">
-                {productsForBulk.length}
-              </span>{" "}
-              · Total estimado:{" "}
-              <span className="font-extrabold tabular-nums">
-                {bulkTotalPreview}
-              </span>{" "}
-              · Hojas estimadas:{" "}
-              <span className="font-extrabold tabular-nums">
-                {bulkPagesPreview}
-              </span>
-            </div>
+                      <button
+                        type="button"
+                        onClick={() => void applyDesiredQty(row.productCode)}
+                        className="h-12 rounded-2xl bg-white px-4 text-sm font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
+                      >
+                        Aplicar
+                      </button>
 
-            <div className="sm:col-span-2">
-              <BigButton className="w-full" onClick={addBulkToSheet}>
-                Agregar masivo a hoja
-              </BigButton>
-            </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void removeAllFromSheetByProductCode(
+                            row.productCode,
+                            row.qty,
+                          )
+                        }
+                        className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-base font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
+                        aria-label="Borrar todas"
+                        title="Borrar todas"
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 
@@ -585,60 +649,111 @@ export default function EtiquetasPage() {
               </div>
             </div>
 
-            <div className="mt-3 rounded-2xl bg-white p-4 ring-1 ring-slate-200 print:mt-0 print:ring-0 print:p-0">
+            <div className="mt-3 rounded-2xl bg-white p-4 ring-1 ring-slate-200 overflow-auto print:mt-0 print:ring-0 print:p-0 print:overflow-visible">
               {sheetPages.map((page, pageIndex) => (
                 <div
                   key={pageIndex}
                   className={[
                     "rounded-2xl bg-white p-4 ring-1 ring-slate-200",
-                    "print:rounded-none print:p-0 print:ring-0",
+                    "print:min-w-0 print:rounded-none print:p-0 print:ring-0",
                     pageIndex === sheetPages.length - 1
                       ? ""
                       : "print:break-after-page",
                   ].join(" ")}
                 >
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 print:grid-cols-8 print:gap-0 print:border print:border-slate-300">
-                    {Array.from({ length: SHEET_PAGE_SIZE }).map((_, idx) => {
-                      const item = page[idx] || null;
-                      const product = item
-                        ? getProductByCode(products, item.productCode)
-                        : null;
-                      const category = getCategoryById(
-                        categories,
-                        product?.categoryId || item?.categoryId,
-                      );
+                  <div className="print:hidden">
+                    <div className="grid grid-cols-2 gap-0 border border-slate-300 sm:grid-cols-4">
+                      {Array.from({ length: SHEET_PAGE_SIZE }).map((_, idx) => {
+                        const item = page[idx] || null;
+                        const product = item
+                          ? getProductByCode(products, item.productCode)
+                          : null;
+                        const category = getCategoryById(
+                          categories,
+                          product?.categoryId || item?.categoryId,
+                        );
 
-                      const col = idx % PRINT_COLS;
-                      const row = Math.floor(idx / PRINT_COLS);
-                      const hasRight = col !== PRINT_COLS - 1;
-                      const hasBottom = row !== PRINT_ROWS - 1;
+                        const col = idx % 4;
+                        const row = Math.floor(idx / 4);
+                        const rowsTotal = Math.ceil(SHEET_PAGE_SIZE / 4);
+                        const hasRight = col !== 3;
+                        const hasBottom = row !== rowsTotal - 1;
 
-                      return (
-                        <div
-                          key={item?.id || `empty-${pageIndex}-${idx}`}
-                          className={[
-                            "h-full w-full",
-                            "print:h-[20.8mm] print:overflow-hidden",
-                            hasRight
-                              ? "print:border-r print:border-slate-300"
-                              : "",
-                            hasBottom
-                              ? "print:border-b print:border-slate-300"
-                              : "",
-                          ].join(" ")}
-                        >
-                          {item ? (
-                            <PrintableLabel
-                              category={category}
-                              product={product}
-                              codeText={item.codeText}
-                            />
-                          ) : (
-                            <div className="h-full w-full" />
-                          )}
-                        </div>
-                      );
-                    })}
+                        return (
+                          <div
+                            key={item?.id || `screen-${pageIndex}-${idx}`}
+                            className={[
+                              "relative h-[210px] w-full overflow-hidden",
+                              "border-slate-300",
+                              hasRight ? "border-r" : "",
+                              hasBottom ? "border-b" : "",
+                            ].join(" ")}
+                          >
+                            {item ? (
+                              <PrintableLabel
+                                category={category}
+                                product={product}
+                                codeText={item.codeText}
+                              />
+                            ) : (
+                              <div className="h-full w-full" />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div
+                    className="hidden print:block mx-auto w-full"
+                    style={{ aspectRatio: "210 / 297" }}
+                  >
+                    <div
+                      className="grid h-full w-full border border-slate-300 print:border print:border-slate-300"
+                      style={{
+                        gridTemplateColumns: `repeat(${PRINT_COLS}, minmax(0, 1fr))`,
+                        gridTemplateRows: `repeat(${PRINT_ROWS}, minmax(0, 1fr))`,
+                      }}
+                    >
+                      {Array.from({ length: SHEET_PAGE_SIZE }).map((_, idx) => {
+                        const item = page[idx] || null;
+                        const product = item
+                          ? getProductByCode(products, item.productCode)
+                          : null;
+                        const category = getCategoryById(
+                          categories,
+                          product?.categoryId || item?.categoryId,
+                        );
+
+                        const col = idx % PRINT_COLS;
+                        const row = Math.floor(idx / PRINT_COLS);
+                        const hasRight = col !== PRINT_COLS - 1;
+                        const hasBottom = row !== PRINT_ROWS - 1;
+
+                        return (
+                          <div
+                            key={item?.id || `print-${pageIndex}-${idx}`}
+                            className={[
+                              "relative h-full w-full overflow-hidden",
+                              "border-slate-300",
+                              hasRight ? "border-r" : "",
+                              hasBottom ? "border-b" : "",
+                              "print:h-[20.8mm] print:overflow-hidden",
+                            ].join(" ")}
+                          >
+                            {item ? (
+                              <PrintableLabel
+                                category={category}
+                                product={product}
+                                codeText={item.codeText}
+                              />
+                            ) : (
+                              <div className="h-full w-full" />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               ))}
