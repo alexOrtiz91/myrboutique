@@ -323,6 +323,7 @@ function A4TemplateSvg({
       width={`${A4_WIDTH_MM}mm`}
       height={`${A4_HEIGHT_MM}mm`}
       viewBox={`0 0 ${A4_WIDTH_MM} ${A4_HEIGHT_MM}`}
+      className="w-full h-auto print:w-auto print:h-auto"
       xmlns="http://www.w3.org/2000/svg"
     >
       <style>{`
@@ -538,6 +539,7 @@ export default function SeparadoresPage() {
 
   const [selectedSizeId, setSelectedSizeId] = useState("");
   const [qtyDraft, setQtyDraft] = useState("1");
+  const [discMultiplier, setDiscMultiplier] = useState(2);
   const [sheet, setSheet] = useState(() => {
     const saved = readJson(SHEET_STORAGE_KEY);
     const next = Array.isArray(saved)
@@ -882,7 +884,7 @@ export default function SeparadoresPage() {
     const sizeId = String(selectedSizeId || "").trim();
     if (!sizeId) return;
     if (!sizesById[sizeId]) return;
-    const qty = parseQty(qtyDraft);
+    const qty = parseQty(qtyDraft) * (discMultiplier === 1 ? 1 : 2);
     if (!qty) return;
 
     setSheet((prev) => {
@@ -901,7 +903,16 @@ export default function SeparadoresPage() {
     setQtyDraft("1");
   }
 
-  function clearSheet() {
+  async function clearSheet() {
+    if (!sheet.length) {
+      setSheet([]);
+      return;
+    }
+    const ok = await showConfirm(
+      `Vas a limpiar la hoja (${sheet.length} etiquetas). ¿Continuar?`,
+      "Separadores",
+    );
+    if (!ok) return;
     setSheet([]);
   }
 
@@ -1278,13 +1289,53 @@ export default function SeparadoresPage() {
               disabled={!sizes.length || sizesStatus === "loading"}
             />
             <Field
-              label="Cantidad"
+              label="Cantidad de discos"
               value={qtyDraft}
               onChange={(e) => setQtyDraft(e.target.value)}
               inputMode="numeric"
               placeholder="Ej. 6"
               className="sm:col-span-2"
             />
+            <div className="sm:col-span-2 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm font-extrabold text-slate-700">
+                  Discos
+                </div>
+                <div className="text-sm font-semibold text-slate-600">
+                  Se agregarán{" "}
+                  <span className="font-extrabold tabular-nums">
+                    {parseQty(qtyDraft) * (discMultiplier === 1 ? 1 : 2)}
+                  </span>{" "}
+                  etiquetas
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDiscMultiplier(1)}
+                  className={[
+                    "h-10 rounded-xl text-sm font-extrabold",
+                    discMultiplier === 1
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-900 ring-1 ring-slate-200",
+                  ].join(" ")}
+                >
+                  x1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDiscMultiplier(2)}
+                  className={[
+                    "h-10 rounded-xl text-sm font-extrabold",
+                    discMultiplier === 2
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-900 ring-1 ring-slate-200",
+                  ].join(" ")}
+                >
+                  x2
+                </button>
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-3 sm:col-span-2">
               <BigButton className="w-full" onClick={addToSheet}>
@@ -1293,7 +1344,7 @@ export default function SeparadoresPage() {
               <BigButton
                 className="w-full"
                 variant="secondary"
-                onClick={clearSheet}
+                onClick={() => void clearSheet()}
               >
                 Limpiar hoja
               </BigButton>
@@ -1382,7 +1433,7 @@ export default function SeparadoresPage() {
               </div>
             </div>
 
-            <div className="mt-3 rounded-2xl bg-white p-4 ring-1 ring-slate-200 print:mt-0 print:ring-0 print:p-0">
+            <div className="mt-3 overflow-auto rounded-2xl bg-white p-4 ring-1 ring-slate-200 print:mt-0 print:ring-0 print:p-0 print:overflow-visible">
               {sheetPages.map((page, pageIndex) => {
                 const filled = Array.from({ length: SHEET_PAGE_SIZE }).map(
                   (_, idx) => {
