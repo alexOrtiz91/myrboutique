@@ -728,6 +728,7 @@ export default function TiendaAdminPage() {
   const productsSearchInputRef = useRef(null);
   const inventorySearchInputRef = useRef(null);
   const [inventoryStockDraft, setInventoryStockDraft] = useState("");
+  const [inventoryAdjustDraft, setInventoryAdjustDraft] = useState("1");
   const [openInventoryCategoryId, setOpenInventoryCategoryId] = useState("");
   const [openProductsCategoryId, setOpenProductsCategoryId] = useState("");
   const [inventorySearchText, setInventorySearchText] = useState("");
@@ -2061,6 +2062,13 @@ export default function TiendaAdminPage() {
     setInventoryStockDraft(String(next));
   }
 
+  function bumpInventoryDraftByInput(direction) {
+    const n = Number.parseInt(String(inventoryAdjustDraft || 0), 10);
+    const base = Number.isFinite(n) ? Math.floor(n) : 0;
+    if (base <= 0) return;
+    bumpInventoryDraft((direction === -1 ? -1 : 1) * base);
+  }
+
   async function saveInventoryAdjustRow() {
     const code = String(editingInventoryProductCode || "").trim();
     if (!code) return;
@@ -3388,6 +3396,49 @@ export default function TiendaAdminPage() {
                                                 type="button"
                                                 onClick={() =>
                                                   bumpInventoryDraft(+1)
+                                                }
+                                                className="h-12 rounded-2xl bg-white text-base font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
+                                              >
+                                                +
+                                              </button>
+                                            </div>
+
+                                            <div className="sm:col-span-3">
+                                              <div className="text-sm font-extrabold text-slate-700">
+                                                Ajuste
+                                              </div>
+                                              <input
+                                                value={inventoryAdjustDraft}
+                                                onChange={(e) =>
+                                                  setInventoryAdjustDraft(
+                                                    e.target.value,
+                                                  )
+                                                }
+                                                inputMode="numeric"
+                                                type="number"
+                                                min="0"
+                                                step="1"
+                                                className={[
+                                                  "mt-2 h-12 w-full rounded-2xl bg-white px-4 text-base font-semibold",
+                                                  "ring-1 ring-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-900",
+                                                ].join(" ")}
+                                              />
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-2 sm:col-span-3">
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  bumpInventoryDraftByInput(-1)
+                                                }
+                                                className="h-12 rounded-2xl bg-white text-base font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
+                                              >
+                                                −
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  bumpInventoryDraftByInput(+1)
                                                 }
                                                 className="h-12 rounded-2xl bg-white text-base font-extrabold text-slate-900 ring-1 ring-slate-200 active:scale-[0.99]"
                                               >
