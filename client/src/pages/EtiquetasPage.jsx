@@ -69,8 +69,7 @@ function LabelPreview({ category, product, codeText }) {
             {category?.name || "—"}
           </div>
           <div className="mt-1 text-base font-extrabold tabular-nums">
-            {product?.talla ? `Talla ${product.talla} · ` : ""}$
-            {category?.price ?? 0}
+            {product?.talla ? `Talla ${product.talla}` : ""}
           </div>
         </div>
         <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-extrabold uppercase tracking-wide text-slate-600 ring-1 ring-slate-200">
@@ -99,9 +98,6 @@ function PrintableLabel({ category, product, codeText }) {
       </div>
       <div className="text-sm font-extrabold tabular-nums print:text-[4px] print:leading-tight">
         {product?.talla ? `T ${product.talla}` : ""}
-      </div>
-      <div className="text-sm font-extrabold tabular-nums print:text-[4px] print:leading-tight">
-        ${category?.price ?? 0}
       </div>
       <div className="mt-2 print:mt-0">
         <div className="mx-auto w-28 print:w-[10mm]">
@@ -459,7 +455,7 @@ export default function EtiquetasPage() {
               onChange={(e) => setCategoryId(e.target.value)}
               options={categories.map((c) => ({
                 value: c.id,
-                label: `${c.name} ($${c.price} / $${c.creditPrice ?? c.price} / $${c.wholesalePrice ?? c.price})`,
+                label: c.name,
               }))}
             />
             <SelectField
@@ -521,7 +517,7 @@ export default function EtiquetasPage() {
                 { value: "", label: "Todas" },
                 ...categories.map((c) => ({
                   value: c.id,
-                  label: `${c.name} ($${c.price} / $${c.creditPrice ?? c.price} / $${c.wholesalePrice ?? c.price})`,
+                  label: c.name,
                 })),
               ]}
               className="sm:col-span-2"
